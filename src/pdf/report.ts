@@ -1,8 +1,8 @@
-import type { Content, TableCell } from 'pdfmake/interfaces';
+import type { Content, TableCell, TDocumentDefinitions } from 'pdfmake/interfaces';
 import type { Client, Currency, Entry, Lang, Settings } from '../../shared/types.ts';
 import { formatDate, formatHours, formatMoney, formatNumber, today } from '../../shared/format.ts';
 import { LABELS } from './labels.ts';
-import { accent, baseDocument, clientBlock, COLORS, headerBlock, metaTable, renderPdf, tableLayout, th } from './common.ts';
+import { accent, baseDocument, clientBlock, COLORS, headerBlock, metaTable, tableLayout, th } from './common.ts';
 
 /** Tabela izveštaja o radu: datum, opis, sati (i opciono iznos) sa zbirom. */
 export function workReportTable(entries: Entry[], lang: Lang, color: string, currency: Currency, showAmounts: boolean): Content {
@@ -53,14 +53,14 @@ export function workReportTable(entries: Entry[], lang: Lang, color: string, cur
   };
 }
 
-export function reportPdf(opts: {
+export function reportDocument(opts: {
   settings: Settings;
   client: Client;
   entries: Entry[];
   from: string;
   to: string;
   showAmounts: boolean;
-}): Promise<Buffer> {
+}): TDocumentDefinitions {
   const { settings, client, entries, from, to, showAmounts } = opts;
   const lang = client.language;
   const L = LABELS[lang];
@@ -94,5 +94,5 @@ export function reportPdf(opts: {
     },
   ];
 
-  return renderPdf(baseDocument(settings, lang, content, `${L.report} – ${client.name}`));
+  return baseDocument(settings, lang, content, `${L.report} – ${client.name}`);
 }

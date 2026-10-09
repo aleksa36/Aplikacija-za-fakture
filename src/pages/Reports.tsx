@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Button, Checkbox, Group, Paper, SimpleGrid, Table, Text, Title, Tooltip } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
-import { IconFileTypeCsv, IconFileTypePdf, IconFileInvoice } from '@tabler/icons-react';
+import { IconDownload, IconFileTypeCsv, IconFileTypePdf, IconFileInvoice } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import type { Currency } from '../../shared/types.ts';
 import { currentPeriod, formatDate, formatHours, formatMoney, monthRange } from '../../shared/format.ts';
-import { qs, useEntries } from '../api.ts';
+import { notifyError, qs, useClients, useEntries, useSettings } from '../api.ts';
+import { downloadReportPdf, openReportPdf } from '../pdf/index.ts';
 import { ClientBadge, ClientSelect, EmptyState, PageHeader, StatCard } from '../components/common.tsx';
 import { moneyList, periodPresets } from '../utils.ts';
 
@@ -44,7 +45,15 @@ export function ReportsPage() {
   for (const [, p] of perClient) totals.set(p.currency, (totals.get(p.currency) ?? 0) + p.value);
   const totalHours = list.reduce((s, e) => s + e.hours, 0);
 
-  const pdfParams = qs({ clientId, from, to, amounts: showAmounts, billableOnly, unbilledOnly });
+  const settings = useSettings();
+  const clients = useClients();
+  const client = clients.data?.find((c) => c.id === clientId);
+  const reportOptions =
+    client && settings.data && from && to ? { settings: settings.data, client, entries: list, from, to, showAmounts } : null;
+  const pdf = (mode: 'open' | 'download') => {
+    if (!reportOptions) return;
+    (mode === 'open' ? openReportPdf(reportOptions) : downloadReportPdf(reportOptions)).catch(notifyError);
+  };
   const csvParams = qs({ clientId, from, to });
 
   return (
@@ -69,16 +78,13 @@ export function ReportsPage() {
         </Group>
         <Group mt="md" gap="xs">
           <Tooltip label="Prvo izaberite klijenta" disabled={!!clientId}>
-            <Button
-              leftSection={<IconFileTypePdf size={16} />}
-              component="a"
-              href={clientId && from && to ? `/api/reports/pdf${pdfParams}` : undefined}
-              target="_blank"
-              disabled={!clientId || !from || !to}
-            >
+            <Button leftSection={<IconFileTypePdf size={16} />} onClick={() => pdf('open')} disabled={!reportOptions}>
               PDF izveštaj za klijenta
             </Button>
           </Tooltip>
+          <Button variant="default" leftSection={<IconDownload size={16} />} onClick={() => pdf('download')} disabled={!reportOptions}>
+            Preuzmi PDF
+          </Button>
           <Button variant="default" leftSection={<IconFileTypeCsv size={16} />} component="a" href={`/api/reports/entries.csv${csvParams}`}>
             Izvezi CSV
           </Button>

@@ -1,22 +1,6 @@
-import { createRequire } from 'node:module';
-import PdfPrinter from 'pdfmake';
 import type { Content, CustomTableLayout, TDocumentDefinitions } from 'pdfmake/interfaces';
 import type { Client, Lang, Settings } from '../../shared/types.ts';
 import { LABELS } from './labels.ts';
-
-const require = createRequire(import.meta.url);
-// Roboto iz pdfmake paketa podržava latinicu sa kvačicama (č, ć, š, ž, đ) i ćirilicu.
-const vfs = require('pdfmake/build/vfs_fonts.js') as Record<string, string>;
-const font = (name: string) => Buffer.from(vfs[name], 'base64');
-
-const printer = new PdfPrinter({
-  Roboto: {
-    normal: font('Roboto-Regular.ttf'),
-    bold: font('Roboto-Medium.ttf'),
-    italics: font('Roboto-Italic.ttf'),
-    bolditalics: font('Roboto-MediumItalic.ttf'),
-  },
-});
 
 export const COLORS = {
   text: '#1f2937',
@@ -25,17 +9,6 @@ export const COLORS = {
   zebra: '#f9fafb',
   soft: '#f3f4f6',
 };
-
-export function renderPdf(doc: TDocumentDefinitions): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const pdf = printer.createPdfKitDocument(doc);
-    const chunks: Buffer[] = [];
-    pdf.on('data', (c: Buffer) => chunks.push(c));
-    pdf.on('end', () => resolve(Buffer.concat(chunks)));
-    pdf.on('error', reject);
-    pdf.end();
-  });
-}
 
 export function accent(settings: Settings): string {
   return /^#[0-9a-f]{6}$/i.test(settings.accentColor) ? settings.accentColor : '#1c7ed6';

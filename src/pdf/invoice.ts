@@ -1,11 +1,12 @@
-import type { Content, TableCell } from 'pdfmake/interfaces';
+import type { Content, TableCell, TDocumentDefinitions } from 'pdfmake/interfaces';
 import type { Entry, Invoice } from '../../shared/types.ts';
 import { formatDate, formatHours, formatMoney, formatNumber } from '../../shared/format.ts';
 import { LABELS } from './labels.ts';
-import { accent, baseDocument, clientBlock, COLORS, headerBlock, metaTable, renderPdf, tableLayout, th } from './common.ts';
+import { accent, baseDocument, clientBlock, COLORS, headerBlock, metaTable, tableLayout, th } from './common.ts';
 import { workReportTable } from './report.ts';
 
-export function invoicePdf(invoice: Invoice, entries: Entry[]): Promise<Buffer> {
+/** Definicija PDF dokumenta fakture (sa opcionim izveštajem o radu kao drugom stranom). */
+export function invoiceDocument(invoice: Invoice, entries: Entry[]): TDocumentDefinitions {
   const lang = invoice.language;
   const L = LABELS[lang];
   const s = invoice.seller;
@@ -176,5 +177,5 @@ export function invoicePdf(invoice: Invoice, entries: Entry[]): Promise<Buffer> 
   if (invoice.status === 'cancelled') {
     doc.watermark = { text: L.cancelled, color: '#e03131', opacity: 0.12, bold: true };
   }
-  return renderPdf(doc);
+  return doc;
 }

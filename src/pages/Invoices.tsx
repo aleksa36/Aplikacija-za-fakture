@@ -4,9 +4,10 @@ import { IconCheck, IconDots, IconDownload, IconEye, IconFileInvoice, IconPlus, 
 import { useNavigate } from 'react-router-dom';
 import type { Invoice, InvoiceStatus, MoneyByCurrency } from '../../shared/types.ts';
 import { formatDate, formatMoney, today } from '../../shared/format.ts';
-import { useInvoiceStatus, useInvoices } from '../api.ts';
+import { notifyError, useInvoiceStatus, useInvoices } from '../api.ts';
+import { downloadInvoicePdf, openInvoicePdf } from '../pdf/index.ts';
 import { ClientSelect, EmptyState, PageHeader, StatCard } from '../components/common.tsx';
-import { downloadUrl, moneyList, STATUS_COLOR, STATUS_LABEL } from '../utils.ts';
+import { moneyList, STATUS_COLOR, STATUS_LABEL } from '../utils.ts';
 
 function sum(list: Invoice[]): MoneyByCurrency[] {
   const map = new Map<Invoice['currency'], number>();
@@ -118,12 +119,12 @@ export function InvoicesPage() {
                     <Table.Td onClick={(e) => e.stopPropagation()} w={110}>
                       <Group gap={4} wrap="nowrap" justify="flex-end">
                         <Tooltip label="Otvori PDF">
-                          <ActionIcon variant="subtle" component="a" href={`/api/invoices/${inv.id}/pdf`} target="_blank" aria-label="PDF">
+                          <ActionIcon variant="subtle" onClick={() => openInvoicePdf(inv.id).catch(notifyError)} aria-label="PDF">
                             <IconEye size={16} />
                           </ActionIcon>
                         </Tooltip>
                         <Tooltip label="Preuzmi PDF">
-                          <ActionIcon variant="subtle" onClick={() => downloadUrl(`/api/invoices/${inv.id}/pdf?download=1`)} aria-label="Preuzmi">
+                          <ActionIcon variant="subtle" onClick={() => downloadInvoicePdf(inv.id).catch(notifyError)} aria-label="Preuzmi">
                             <IconDownload size={16} />
                           </ActionIcon>
                         </Tooltip>

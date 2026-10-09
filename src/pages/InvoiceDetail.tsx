@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActionIcon,
   Alert,
@@ -6,6 +6,7 @@ import {
   Button,
   Grid,
   Group,
+  Loader,
   Menu,
   NumberInput,
   Paper,
@@ -34,9 +35,10 @@ import {
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { InvoiceItem, InvoiceStatus, InvoiceUpdateInput } from '../../shared/types.ts';
 import { formatDate, formatHours, formatMoney, today } from '../../shared/format.ts';
-import { useDeleteInvoice, useInvoice, useInvoiceStatus, useUpdateInvoice } from '../api.ts';
+import { type InvoiceWithEntries, notifyError, useDeleteInvoice, useInvoice, useInvoiceStatus, useUpdateInvoice } from '../api.ts';
+import { downloadInvoicePdf, invoiceDocument, openInvoicePdf, usePdfUrl } from '../pdf/index.ts';
 import { EmptyState, PageHeader } from '../components/common.tsx';
-import { downloadUrl, STATUS_LABEL } from '../utils.ts';
+import { STATUS_LABEL } from '../utils.ts';
 import { StatusBadge } from './Invoices.tsx';
 
 export function InvoiceDetailPage() {
@@ -48,7 +50,7 @@ export function InvoiceDetailPage() {
   const setStatus = useInvoiceStatus();
   const del = useDeleteInvoice();
   const [form, setForm] = useState<InvoiceUpdateInput | null>(null);
-  const [pdfVersion, setPdfVersion] = useState(0);
+  const [tab, setTab] = useState<string | null>('edit');
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
@@ -88,10 +90,7 @@ export function InvoiceDetailPage() {
     update.mutate(
       { id: invoiceId, data: form },
       {
-        onSuccess: () => {
-          setDirty(false);
-          setPdfVersion((v) => v + 1);
-        },
+        onSuccess: () => setDirty(false),
       },
     );
 
@@ -100,10 +99,7 @@ export function InvoiceDetailPage() {
       setStatus.mutate(
         { id: invoiceId, status },
         {
-          onSuccess: () => {
-            setDirty(false);
-            setPdfVersion((v) => v + 1);
-          },
+          onSuccess: () => setDirty(false),
         },
       );
     if (status === 'cancelled') {
@@ -135,7 +131,6 @@ export function InvoiceDetailPage() {
       onConfirm: () => del.mutate(invoiceId, { onSuccess: () => navigate('/fakture') }),
     });
 
-  const pdfUrl = `/api/invoices/${invoiceId}/pdf`;
 
   return (
     <>
@@ -155,10 +150,20 @@ export function InvoiceDetailPage() {
         }
         actions={
           <>
-            <Button variant="default" component="a" href={pdfUrl} target="_blank" leftSection={<IconExternalLink size={16} />} disabled={dirty}>
+            <Button
+              variant="default"
+              onClick={() => openInvoicePdf(invoiceId, inv).catch(notifyError)}
+              leftSection={<IconExternalLink size={16} />}
+              disabled={dirty}
+            >
               Otvori PDF
             </Button>
-            <Button variant="default" onClick={() => downloadUrl(`${pdfUrl}?download=1`)} leftSection={<IconDownload size={16} />} disabled={dirty}>
+            <Button
+              variant="default"
+              onClick={() => downloadInvoicePdf(invoiceId, inv).catch(notifyError)}
+              leftSection={<IconDownload size={16} />}
+              disabled={dirty}
+            >
               Preuzmi
             </Button>
             {inv.status !== 'paid' && inv.status !== 'cancelled' && (
@@ -204,7 +209,7 @@ export function InvoiceDetailPage() {
         </Alert>
       )}
 
-      <Tabs defaultValue="edit" keepMounted={false}>
+      <Tabs value={tab} onChange={setTab} keepMounted={false}>
         <Tabs.List mb="md">
           <Tabs.Tab value="edit">Podaci i stavke</Tabs.Tab>
           <Tabs.Tab value="preview" disabled={dirty}>
@@ -373,7 +378,7 @@ export function InvoiceDetailPage() {
         </Tabs.Panel>
 
         <Tabs.Panel value="preview">
-          <iframe key={pdfVersion} className="pdf-frame" src={`${pdfUrl}?v=${pdfVersion}`} title="Pregled fakture" />
+          <PdfPreview invoice={tab === 'preview' ? inv : null} />
         </Tabs.Panel>
 
         <Tabs.Panel value="entries">
@@ -407,4 +412,12 @@ export function InvoiceDetailPage() {
       </Tabs>
     </>
   );
+}
+
+function PdfPreview({ invoice }: { invoice: InvoiceWithEntries | null }) {
+  const doc = useMemo(() => (invoice ? invoiceDocument(invoice, invoice.entries) : null), [invoice]);
+  const { url, error } = usePdfUrl(doc);
+  if (error) return <Alert color="red">PDF nije mogao da se napravi: {error}</Alert>;
+  if (!url) return <Group justify="center" py="xl"><Loader /></Group>;
+  return <iframe className="pdf-frame" src={url} title="Pregled fakture" />;
 }

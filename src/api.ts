@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { notifications } from '@mantine/notifications';
+import { queryClient } from './queryClient.ts';
 import type {
   Client,
   ClientInput,
@@ -15,6 +16,9 @@ import type {
   Settings,
 } from '../shared/types.ts';
 
+/** Greška kada je sesija istekla ili korisnik nije prijavljen. */
+export class AuthError extends Error {}
+
 export async function request<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method: options.method ?? 'GET',
@@ -22,8 +26,21 @@ export async function request<T>(path: string, options: { method?: string; body?
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
   if (res.status === 204) return undefined as T;
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((data as { error?: string }).error ?? `Greška ${res.status}`);
+  const data = await res.json().catch(() => null);
+  if (res.status === 401 && path !== '/login') {
+    // Sesija je istekla: ponovo proveri stanje prijave, aplikacija će prikazati ekran za prijavu.
+    void queryClient.invalidateQueries({ queryKey: ['session'] });
+    throw new AuthError('Potrebna je prijava.');
+  }
+  if (!res.ok || data === null) {
+    const message = (data as { error?: string } | null)?.error;
+    throw new Error(
+      message ??
+        (res.status === 404
+          ? 'API nije dostupan (404). Proverite da li server/Netlify funkcija radi.'
+          : `Greška ${res.status}`),
+    );
+  }
   return data as T;
 }
 
@@ -38,6 +55,7 @@ export function qs(params: Record<string, string | number | boolean | null | und
 }
 
 export function notifyError(err: unknown) {
+  if (err instanceof AuthError) return;
   notifications.show({ color: 'red', title: 'Greška', message: err instanceof Error ? err.message : String(err) });
 }
 
@@ -46,6 +64,26 @@ export function notifyOk(message: string) {
 }
 
 // ---------- Upiti ----------
+
+export interface Session {
+  required: boolean;
+  authenticated: boolean;
+}
+
+export const useSession = () =>
+  useQuery({ queryKey: ['session'], queryFn: () => request<Session>('/session'), retry: false, staleTime: 60_000 });
+
+export async function login(password: string) {
+  await request('/login', { method: 'POST', body: { password } });
+  await queryClient.resetQueries();
+}
+
+export async function logout() {
+  await request('/logout', { method: 'POST', body: {} });
+  // Prvo prikaži ekran za prijavu, pa tek onda obriši keširane podatke (bez nepotrebnih 401 zahteva).
+  queryClient.setQueryData<Session>(['session'], (s) => ({ required: s?.required ?? true, authenticated: false }));
+  queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== 'session' });
+}
 
 export const useSettings = () => useQuery({ queryKey: ['settings'], queryFn: () => request<Settings>('/settings') });
 

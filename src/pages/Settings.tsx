@@ -19,11 +19,13 @@ import {
   Title,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
-import { IconDatabaseExport, IconDeviceFloppy, IconPhoto, IconTrash } from '@tabler/icons-react';
+import { IconDatabaseExport, IconDatabaseImport, IconDeviceFloppy, IconPhoto, IconTrash } from '@tabler/icons-react';
+import { modals } from '@mantine/modals';
+import { useQueryClient } from '@tanstack/react-query';
 import type { Settings } from '../../shared/types.ts';
 import { CURRENCIES } from '../../shared/types.ts';
 import { formatInvoiceNumber, today } from '../../shared/format.ts';
-import { notifyError, useSaveSettings, useSettings } from '../api.ts';
+import { notifyError, notifyOk, request, useSaveSettings, useSettings } from '../api.ts';
 import { PageHeader } from '../components/common.tsx';
 import { downloadUrl } from '../utils.ts';
 
@@ -64,6 +66,32 @@ export function SettingsPage() {
   const settings = useSettings();
   const save = useSaveSettings();
   const form = useForm<Settings>({ initialValues: undefined as unknown as Settings });
+  const queryClient = useQueryClient();
+
+  const confirmRestore = (file: File) =>
+    modals.openConfirmModal({
+      title: 'Vraćanje iz rezervne kopije',
+      children: (
+        <Text size="sm">
+          Svi trenutni podaci biće <b>obrisani</b> i zamenjeni podacima iz datoteke „{file.name}”. Nastaviti?
+        </Text>
+      ),
+      labels: { confirm: 'Vrati podatke', cancel: 'Otkaži' },
+      confirmProps: { color: 'red' },
+      onConfirm: async () => {
+        try {
+          const backup = JSON.parse(await file.text());
+          const res = await request<{ restored: Record<string, number> }>('/restore', { method: 'POST', body: backup });
+          await queryClient.resetQueries();
+          const fresh = await request<Settings>('/settings');
+          form.setInitialValues(fresh);
+          form.setValues(fresh);
+          notifyOk(`Podaci su vraćeni (${res.restored.clients ?? 0} klijenata, ${res.restored.entries ?? 0} unosa, ${res.restored.invoices ?? 0} faktura).`);
+        } catch (err) {
+          notifyError(err instanceof SyntaxError ? new Error('Datoteka nije ispravan JSON.') : err);
+        }
+      },
+    });
 
   useEffect(() => {
     if (settings.data && !form.initialized) form.initialize(settings.data);
@@ -206,12 +234,21 @@ export function SettingsPage() {
 
             <Section title="Rezervna kopija">
               <Text size="sm" c="dimmed" mb="sm">
-                Svi podaci se čuvaju u jednoj SQLite datoteci. Preuzmite kopiju povremeno i čuvajte je na sigurnom (npr. Google
-                Drive). Za vraćanje, zamenite datoteku <code>data/fakture.db</code> preuzetom kopijom.
+                Preuzmite sve podatke (klijente, sate, održavanja, fakture i podešavanja) u jednoj JSON datoteci i čuvajte je na
+                sigurnom. Istom datotekom podatke možete vratiti ili ih preneti u drugu bazu (npr. sa računara na Supabase).
               </Text>
-              <Button variant="default" leftSection={<IconDatabaseExport size={16} />} onClick={() => downloadUrl('/api/backup')}>
-                Preuzmi rezervnu kopiju
-              </Button>
+              <Group gap="xs">
+                <Button variant="default" leftSection={<IconDatabaseExport size={16} />} onClick={() => downloadUrl('/api/backup')}>
+                  Preuzmi rezervnu kopiju
+                </Button>
+                <FileButton accept="application/json,.json" onChange={(file) => file && confirmRestore(file)}>
+                  {(props) => (
+                    <Button {...props} variant="subtle" color="red" leftSection={<IconDatabaseImport size={16} />}>
+                      Vrati iz kopije…
+                    </Button>
+                  )}
+                </FileButton>
+              </Group>
             </Section>
           </Stack>
         </Grid.Col>

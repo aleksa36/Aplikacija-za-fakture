@@ -1,4 +1,4 @@
-import { Button, Grid, Group, Paper, Progress, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
+import { Alert, Button, Grid, Group, Paper, Progress, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
 import { IconAlertTriangle, IconClockHour4, IconCoin, IconFileInvoice, IconPlus, IconReceipt } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import { formatDate, formatHours, formatMoney, formatMonth } from '../../shared/format.ts';
@@ -8,7 +8,8 @@ import { moneyList } from '../utils.ts';
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { data } = useDashboard();
+  const { data, error } = useDashboard();
+  if (error) return <Alert color="red" title="Pregled nije mogao da se učita">{error.message}</Alert>;
   if (!data) return null;
 
   const maxHours = Math.max(1, ...data.perClient.map((p) => p.hours));

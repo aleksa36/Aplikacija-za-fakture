@@ -1,4 +1,4 @@
-import { AppShell, Burger, Group, NavLink, Text, ThemeIcon, ActionIcon, useMantineColorScheme, Stack, Alert } from '@mantine/core';
+import { AppShell, Burger, Group, NavLink, Text, ThemeIcon, ActionIcon, useMantineColorScheme, Stack, Alert, Center, Loader, Tooltip, Paper, Title } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import {
   IconLayoutDashboard,
@@ -11,6 +11,8 @@ import {
   IconSun,
   IconMoon,
   IconReceipt2,
+  IconLogout,
+  IconAlertTriangle,
 } from '@tabler/icons-react';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import { DashboardPage } from './pages/Dashboard.tsx';
@@ -22,7 +24,8 @@ import { InvoiceNewPage } from './pages/InvoiceNew.tsx';
 import { InvoiceDetailPage } from './pages/InvoiceDetail.tsx';
 import { ReportsPage } from './pages/Reports.tsx';
 import { SettingsPage } from './pages/Settings.tsx';
-import { useSettings } from './api.ts';
+import { logout, notifyError, useSession, useSettings } from './api.ts';
+import { LoginPage } from './pages/Login.tsx';
 
 const NAV = [
   { to: '/', label: 'Pregled', icon: IconLayoutDashboard },
@@ -35,6 +38,32 @@ const NAV = [
 ];
 
 export function App() {
+  const session = useSession();
+  if (session.isPending) {
+    return (
+      <Center h="100vh">
+        <Loader />
+      </Center>
+    );
+  }
+  if (session.isError) {
+    return (
+      <Center mih="100vh" p="md">
+        <Paper p="xl" maw={520}>
+          <Group gap="xs" mb="sm">
+            <IconAlertTriangle color="var(--mantine-color-red-6)" />
+            <Title order={4}>Aplikacija nije podešena</Title>
+          </Group>
+          <Text size="sm">{session.error.message}</Text>
+        </Paper>
+      </Center>
+    );
+  }
+  if (session.data.required && !session.data.authenticated) return <LoginPage />;
+  return <Shell canLogout={session.data.required} />;
+}
+
+function Shell({ canLogout }: { canLogout: boolean }) {
   const [opened, { toggle, close }] = useDisclosure();
   const location = useLocation();
   const { colorScheme, setColorScheme } = useMantineColorScheme();
@@ -54,14 +83,23 @@ export function App() {
             </ThemeIcon>
             <Text fw={700}>Fakture i sati</Text>
           </Group>
-          <ActionIcon
-            variant="default"
-            size="lg"
-            aria-label="Promeni temu"
-            onClick={() => setColorScheme(colorScheme === 'dark' ? 'light' : 'dark')}
-          >
-            {colorScheme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
-          </ActionIcon>
+          <Group gap="xs">
+            <ActionIcon
+              variant="default"
+              size="lg"
+              aria-label="Promeni temu"
+              onClick={() => setColorScheme(colorScheme === 'dark' ? 'light' : 'dark')}
+            >
+              {colorScheme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
+            </ActionIcon>
+            {canLogout && (
+              <Tooltip label="Odjavi se">
+                <ActionIcon variant="default" size="lg" aria-label="Odjavi se" onClick={() => logout().catch(notifyError)}>
+                  <IconLogout size={18} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+          </Group>
         </Group>
       </AppShell.Header>
 

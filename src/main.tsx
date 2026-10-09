@@ -5,7 +5,7 @@ import { MantineProvider, createTheme } from '@mantine/core';
 import { DatesProvider } from '@mantine/dates';
 import { Notifications } from '@mantine/notifications';
 import { ModalsProvider } from '@mantine/modals';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import 'dayjs/locale/sr';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
@@ -14,6 +14,7 @@ import '@mantine/dates/styles.css';
 import '@mantine/notifications/styles.css';
 import './styles.css';
 import { App } from './App.tsx';
+import { queryClient } from './queryClient.ts';
 
 dayjs.extend(customParseFormat);
 dayjs.locale('sr');
@@ -27,10 +28,6 @@ const theme = createTheme({
     Card: { defaultProps: { withBorder: true, radius: 'md' } },
     Modal: { defaultProps: { centered: true } },
   },
-});
-
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: 10_000, refetchOnWindowFocus: true, retry: 1 } },
 });
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

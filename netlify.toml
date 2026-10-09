@@ -1,0 +1,23 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# API ide u Netlify funkciju.
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+# Sve ostale putanje vode na React aplikaciju (npr. /fakture/3 posle osvežavanja stranice).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

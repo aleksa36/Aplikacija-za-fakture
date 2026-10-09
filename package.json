@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Interna aplikacija za evidenciju sati, održavanja, fakture i izveštaje",
+  "description": "Interna aplikacija za evidenciju sati, održavanja, fakture i izveštaje (Netlify + Supabase ili lokalno)",
   "engines": {
-    "node": ">=22.13"
+    "node": ">=20.12"
   },
   "scripts": {
     "dev": "concurrently -k -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@mantine/core": "8.3.18",
     "@mantine/dates": "8.3.18",
     "@mantine/form": "8.3.18",
@@ -27,9 +28,11 @@
     "dayjs": "^1.11.13",
     "express": "^5.1.0",
     "pdfmake": "0.2.23",
+    "postgres": "^3.4.9",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.6.0",
+    "serverless-http": "^3.2.0",
     "tsx": "^4.20.0"
   },
   "devDependencies": {
