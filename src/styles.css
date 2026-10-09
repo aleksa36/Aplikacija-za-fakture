@@ -1,0 +1,29 @@
+body {
+  background: var(--mantine-color-body);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.clickable-row {
+  cursor: pointer;
+}
+
+.clickable-row:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.nav-link[data-active] {
+  font-weight: 600;
+}
+
+.pdf-frame {
+  width: 100%;
+  height: 80vh;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  background: #fff;
+}
