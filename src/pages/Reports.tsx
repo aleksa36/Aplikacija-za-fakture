@@ -4,11 +4,11 @@ import { DatePickerInput } from '@mantine/dates';
 import { IconDownload, IconFileTypeCsv, IconFileTypePdf, IconFileInvoice } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import type { Currency } from '../../shared/types.ts';
-import { currentPeriod, formatDate, formatHours, formatMoney, monthRange } from '../../shared/format.ts';
+import { currentPeriod, formatDateRange, formatHours, formatMoney, monthRange } from '../../shared/format.ts';
 import { notifyError, qs, useClients, useEntries, useSettings } from '../api.ts';
 import { downloadReportPdf, openReportPdf } from '../pdf/index.ts';
 import { ClientBadge, ClientSelect, EmptyState, PageHeader, StatCard } from '../components/common.tsx';
-import { moneyList, periodPresets } from '../utils.ts';
+import { countEntries, moneyList, periodPresets } from '../utils.ts';
 
 export function ReportsPage() {
   const navigate = useNavigate();
@@ -101,7 +101,7 @@ export function ReportsPage() {
       </Paper>
 
       <SimpleGrid cols={{ base: 1, sm: 3 }} mb="md">
-        <StatCard label="Ukupno sati" value={`${formatHours(totalHours)} h`} hint={`${list.length} unosa`} />
+        <StatCard label="Ukupno sati" value={`${formatHours(totalHours)} h`} hint={countEntries(list.length)} />
         <StatCard label="Vrednost" value={moneyList([...totals].map(([currency, amount]) => ({ currency, amount })))} />
         <StatCard label="Klijenata" value={perClient.length} />
       </SimpleGrid>
@@ -158,14 +158,17 @@ export function ReportsPage() {
               <Table.Tbody>
                 {list.map((e) => (
                   <Table.Tr key={e.id}>
-                    <Table.Td style={{ whiteSpace: 'nowrap' }}>{formatDate(e.date)}</Table.Td>
+                    <Table.Td style={{ whiteSpace: 'nowrap' }}>{formatDateRange(e.date, e.dateTo)}</Table.Td>
                     {!clientId && (
                       <Table.Td>
                         <ClientBadge name={e.clientName} color={e.clientColor} />
                       </Table.Td>
                     )}
                     <Table.Td>
-                      <Text size="sm">{e.description}</Text>
+                      <Text size="sm">
+                        {e.project && <b>{e.project}: </b>}
+                        {e.description}
+                      </Text>
                     </Table.Td>
                     <Table.Td className="num">{e.hours ? formatHours(e.hours) : '—'}</Table.Td>
                     <Table.Td className="num">{formatMoney(e.value ?? 0, e.currency ?? '')}</Table.Td>

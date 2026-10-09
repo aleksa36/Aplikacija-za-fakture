@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { Client, Entry, Maintenance, Settings } from '../shared/types.ts';
+import type { Client, Entry, Settings, Todo } from '../shared/types.ts';
 
 // Baza je PostgreSQL:
 // - ako je postavljen DATABASE_URL (npr. Supabase), koristi se ta baza;
@@ -100,7 +100,8 @@ export function getDb(): Promise<Db> {
 
 // ---------- Migracije ----------
 
-const TABLES = ['settings', 'clients', 'maintenance', 'invoices', 'invoice_items', 'entries', 'maintenance_runs'];
+// Redosled je bitan za uvoz (strani ključevi).
+const TABLES = ['settings', 'clients', 'todos', 'invoices', 'invoice_items', 'entries', 'maintenance_log'];
 
 const migrations: string[] = [
   `
@@ -218,6 +219,61 @@ const migrations: string[] = [
   ALTER TABLE entries ENABLE ROW LEVEL SECURITY;
   ALTER TABLE maintenance_runs ENABLE ROW LEVEL SECURITY;
   `,
+  // 2: jednostavniji model – mesečno održavanje je iznos na klijentu, ručni unos ima period od–do,
+  //    projekti na unosima i todo lista po klijentu.
+  `
+  ALTER TABLE clients ADD COLUMN maintenance_amount double precision NOT NULL DEFAULT 0;
+  ALTER TABLE clients ADD COLUMN maintenance_label text NOT NULL DEFAULT 'Mesečno održavanje';
+  ALTER TABLE clients ADD COLUMN maintenance_start text;
+
+  ALTER TABLE entries ADD COLUMN kind text NOT NULL DEFAULT 'manual';
+  ALTER TABLE entries ADD COLUMN period text;
+  ALTER TABLE entries ADD COLUMN date_to text;
+  ALTER TABLE entries ADD COLUMN project text NOT NULL DEFAULT '';
+
+  -- Prenos postojećih pravila održavanja na klijente (prvo aktivno paušalno pravilo po klijentu).
+  UPDATE clients c SET
+    maintenance_amount = m.fixed_amount,
+    maintenance_label = COALESCE(NULLIF(trim(regexp_replace(m.description, '\\s*[–-]?\\s*\\{[a-z]+\\}', '', 'gi')), ''), 'Mesečno održavanje'),
+    maintenance_start = substr(m.start_date, 1, 7)
+  FROM (
+    SELECT DISTINCT ON (client_id) * FROM maintenance
+    WHERE active AND fixed_amount IS NOT NULL AND fixed_amount > 0
+    ORDER BY client_id, id
+  ) m
+  WHERE m.client_id = c.id;
+
+  UPDATE entries SET kind = 'maintenance', period = substr(date, 1, 7) WHERE maintenance_id IS NOT NULL;
+
+  -- Meseci za koje je održavanje već upisano (da se obrisana stavka ne bi ponovo pojavila).
+  CREATE TABLE maintenance_log (
+    client_id integer NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    period text NOT NULL,
+    PRIMARY KEY (client_id, period)
+  );
+  INSERT INTO maintenance_log (client_id, period)
+    SELECT DISTINCT m.client_id, r.period FROM maintenance_runs r JOIN maintenance m ON m.id = r.maintenance_id
+    ON CONFLICT DO NOTHING;
+
+  ALTER TABLE entries DROP COLUMN maintenance_id;
+  DROP TABLE maintenance_runs;
+  DROP TABLE maintenance;
+
+  CREATE INDEX idx_entries_maintenance ON entries(client_id, period) WHERE kind = 'maintenance';
+
+  CREATE TABLE todos (
+    id serial PRIMARY KEY,
+    client_id integer NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    text text NOT NULL,
+    done boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    done_at timestamptz
+  );
+  CREATE INDEX idx_todos_client ON todos(client_id);
+
+  ALTER TABLE maintenance_log ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE todos ENABLE ROW LEVEL SECURITY;
+  `,
 ];
 
 async function migrate(db: Db) {
@@ -315,6 +371,8 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultInvoiceNoteEn: 'The issuer is not registered for VAT.\nThe invoice is valid without stamp and signature.',
   serviceDescription: 'Usluge razvoja i održavanja softvera',
   serviceDescriptionEn: 'Software development and maintenance services',
+  ipsQr: true,
+  paymentCode: '221',
 };
 
 export async function getSettings(db: Db): Promise<Settings> {
@@ -359,7 +417,11 @@ export function mapClient(r: Row): Client {
     notes: r.notes as string,
     color: r.color as string,
     archived: !!r.archived,
+    maintenanceAmount: (r.maintenance_amount as number) ?? 0,
+    maintenanceLabel: (r.maintenance_label as string) ?? '',
+    maintenanceStart: (r.maintenance_start as string | null) ?? null,
     createdAt: ts(r.created_at),
+    openTodos: (r.open_todos as number | undefined) ?? undefined,
   };
 }
 
@@ -371,13 +433,16 @@ export function mapEntry(r: Row): Entry {
   return {
     id: r.id as number,
     clientId: r.client_id as number,
+    kind: (r.kind as Entry['kind']) ?? 'manual',
     date: r.date as string,
+    dateTo: (r.date_to as string | null) ?? null,
+    period: (r.period as string | null) ?? null,
+    project: (r.project as string) ?? '',
     description: r.description as string,
     hours,
     rate,
     fixedAmount,
     billable: !!r.billable,
-    maintenanceId: (r.maintenance_id as number | null) ?? null,
     invoiceId: (r.invoice_id as number | null) ?? null,
     invoiceNumber: (r.invoice_number as string | null) ?? null,
     createdAt: ts(r.created_at),
@@ -393,21 +458,19 @@ export function entryValue(hours: number, rate: number, fixedAmount: number | nu
   return round2(fixedAmount ?? hours * rate);
 }
 
-export function mapMaintenance(r: Row): Maintenance {
+/** SQL izraz za vrednost stavke (alias e = entries, c = clients). */
+export const ENTRY_VALUE_SQL = 'COALESCE(e.fixed_amount, e.hours * COALESCE(e.rate, c.hourly_rate))';
+
+export function mapTodo(r: Row): Todo {
   return {
     id: r.id as number,
     clientId: r.client_id as number,
-    description: r.description as string,
-    hours: r.hours as number,
-    fixedAmount: (r.fixed_amount as number | null) ?? null,
-    intervalMonths: r.interval_months as number,
-    dayOfMonth: r.day_of_month as number,
-    startDate: r.start_date as string,
-    endDate: (r.end_date as string | null) ?? null,
-    active: !!r.active,
+    text: r.text as string,
+    done: !!r.done,
     createdAt: ts(r.created_at),
+    doneAt: r.done_at ? ts(r.done_at) : null,
     clientName: r.client_name as string | undefined,
-    lastPeriod: (r.last_period as string | null) ?? null,
+    clientColor: r.client_color as string | undefined,
   };
 }
 

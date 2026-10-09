@@ -1,10 +1,11 @@
 import { Alert, Button, Grid, Group, Paper, Progress, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
 import { IconAlertTriangle, IconClockHour4, IconCoin, IconFileInvoice, IconPlus, IconReceipt } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
-import { formatDate, formatHours, formatMoney, formatMonth } from '../../shared/format.ts';
+import { formatDate, formatDateRange, formatHours, formatMoney, formatMonth } from '../../shared/format.ts';
 import { useDashboard } from '../api.ts';
 import { ClientBadge, ClientDot, EmptyState, PageHeader, StatCard } from '../components/common.tsx';
 import { moneyList } from '../utils.ts';
+import { TodoRow } from '../components/TodoList.tsx';
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -23,7 +24,7 @@ export function DashboardPage() {
         actions={
           <>
             <Button leftSection={<IconPlus size={16} />} onClick={() => navigate('/sati')}>
-              Unesi sate
+              Unesi
             </Button>
             <Button variant="default" leftSection={<IconFileInvoice size={16} />} onClick={() => navigate('/fakture/nova')}>
               Nova faktura
@@ -88,7 +89,7 @@ export function DashboardPage() {
       )}
 
       <Grid gutter="lg">
-        <Grid.Col span={{ base: 12, md: 6 }}>
+        <Grid.Col span={{ base: 12, md: 6, xl: 4 }}>
           <Paper p="md" h="100%">
             <Title order={5} mb="md">
               Ovaj mesec po klijentima
@@ -117,7 +118,7 @@ export function DashboardPage() {
             )}
           </Paper>
         </Grid.Col>
-        <Grid.Col span={{ base: 12, md: 6 }}>
+        <Grid.Col span={{ base: 12, md: 6, xl: 4 }}>
           <Paper p="md" h="100%">
             <Group justify="space-between" mb="xs">
               <Title order={5}>Poslednji unosi</Title>
@@ -134,7 +135,7 @@ export function DashboardPage() {
                     <Table.Tr key={e.id}>
                       <Table.Td w={95}>
                         <Text size="xs" c="dimmed">
-                          {formatDate(e.date)}
+                          {formatDateRange(e.date, e.dateTo)}
                         </Text>
                       </Table.Td>
                       <Table.Td>
@@ -152,6 +153,22 @@ export function DashboardPage() {
                   ))}
                 </Table.Tbody>
               </Table>
+            )}
+          </Paper>
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, xl: 4 }}>
+          <Paper p="md" h="100%">
+            <Title order={5} mb="sm">
+              Otvoreni zadaci
+            </Title>
+            {data.openTodos.length === 0 ? (
+              <EmptyState>Nema otvorenih zadataka. Zadatke dodajete na stranici klijenta.</EmptyState>
+            ) : (
+              <Stack gap="sm">
+                {data.openTodos.map((t) => (
+                  <TodoRow key={t.id} todo={t} showClient />
+                ))}
+              </Stack>
             )}
           </Paper>
         </Grid.Col>

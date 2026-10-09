@@ -11,9 +11,9 @@ import type {
   InvoiceCreateInput,
   InvoiceStatus,
   InvoiceUpdateInput,
-  Maintenance,
-  MaintenanceInput,
   Settings,
+  Stats,
+  Todo,
 } from '../shared/types.ts';
 
 /** Greška kada je sesija istekla ili korisnik nije prijavljen. */
@@ -95,6 +95,7 @@ export interface EntryFilter {
   to?: string | null;
   unbilled?: boolean;
   search?: string;
+  project?: string | null;
 }
 
 export const useEntries = (filter: EntryFilter, enabled = true) =>
@@ -104,9 +105,6 @@ export const useEntries = (filter: EntryFilter, enabled = true) =>
     enabled,
   });
 
-export const useMaintenance = () =>
-  useQuery({ queryKey: ['maintenance'], queryFn: () => request<Maintenance[]>('/maintenance') });
-
 export const useInvoices = (filter: { clientId?: number | null; status?: string | null; year?: number | null }) =>
   useQuery({ queryKey: ['invoices', filter], queryFn: () => request<Invoice[]>(`/invoices${qs(filter)}`) });
 
@@ -114,6 +112,21 @@ export type InvoiceWithEntries = Invoice & { entries: Entry[] };
 
 export const useInvoice = (id: number) =>
   useQuery({ queryKey: ['invoice', id], queryFn: () => request<InvoiceWithEntries>(`/invoices/${id}`) });
+
+export const useTodos = (filter: { clientId?: number | null; open?: boolean }) =>
+  useQuery({ queryKey: ['todos', filter], queryFn: () => request<Todo[]>(`/todos${qs(filter)}`) });
+
+export const useProjects = (clientId: number | null) =>
+  useQuery({ queryKey: ['projects', clientId], queryFn: () => request<string[]>(`/projects${qs({ clientId })}`) });
+
+export const useStats = (filter: { from: string | null; to: string | null; clientId?: number | null }) =>
+  useQuery({
+    queryKey: ['stats', filter],
+    queryFn: () => request<Stats>(`/stats${qs(filter)}`),
+    enabled: !!filter.from && !!filter.to,
+  });
+
+export const useClient = (id: number) => useQuery({ queryKey: ['client', id], queryFn: () => request<Client>(`/clients/${id}`) });
 
 export const useDashboard = () => useQuery({ queryKey: ['dashboard'], queryFn: () => request<Dashboard>('/dashboard') });
 
@@ -150,19 +163,19 @@ export const useSaveEntry = () =>
     request<Entry>(id ? `/entries/${id}` : '/entries', { method: id ? 'PUT' : 'POST', body: data }),
   );
 
-export const useDeleteEntry = () =>
-  useApiMutation((id: number) => request<void>(`/entries/${id}`, { method: 'DELETE' }), 'Stavka je obrisana.');
-
-export const useSaveMaintenance = () =>
-  useApiMutation(({ id, data }: { id?: number; data: MaintenanceInput }) =>
-    request<Maintenance & { createdEntries: number }>(id ? `/maintenance/${id}` : '/maintenance', {
-      method: id ? 'PUT' : 'POST',
-      body: data,
-    }),
+export const useDeleteEntries = () =>
+  useApiMutation(
+    (ids: number[]) => request<{ deleted: number }>('/entries/bulk-delete', { method: 'POST', body: { ids } }),
   );
 
-export const useDeleteMaintenance = () =>
-  useApiMutation((id: number) => request<void>(`/maintenance/${id}`, { method: 'DELETE' }), 'Održavanje je obrisano.');
+export const useSaveTodo = () =>
+  useApiMutation((t: { id?: number; clientId?: number; text?: string; done?: boolean }) =>
+    t.id
+      ? request<Todo>(`/todos/${t.id}`, { method: 'PATCH', body: { text: t.text, done: t.done } })
+      : request<Todo>('/todos', { method: 'POST', body: { clientId: t.clientId, text: t.text } }),
+  );
+
+export const useDeleteTodo = () => useApiMutation((id: number) => request<void>(`/todos/${id}`, { method: 'DELETE' }));
 
 export const useCreateInvoice = () =>
   useApiMutation((data: InvoiceCreateInput) => request<Invoice>('/invoices', { method: 'POST', body: data }), 'Faktura je kreirana.');
@@ -178,5 +191,10 @@ export const useInvoiceStatus = () =>
     request<Invoice>(`/invoices/${id}/status`, { method: 'PATCH', body: { status } }),
   );
 
-export const useDeleteInvoice = () =>
-  useApiMutation((id: number) => request<void>(`/invoices/${id}`, { method: 'DELETE' }), 'Faktura je obrisana.');
+/** entries: 'delete' briše i unose sa faktura, 'release' ih vraća u nefakturisane. */
+export const useDeleteInvoices = () =>
+  useApiMutation(
+    ({ ids, entries }: { ids: number[]; entries: 'delete' | 'release' }) =>
+      request<{ deleted: number }>('/invoices/bulk-delete', { method: 'POST', body: { ids, entries } }),
+    'Obrisano.',
+  );

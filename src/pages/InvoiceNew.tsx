@@ -22,7 +22,7 @@ import { DateInput, DatePickerInput } from '@mantine/dates';
 import { useQuery } from '@tanstack/react-query';
 import { IconInfoCircle, IconRepeat } from '@tabler/icons-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { addDays, currentPeriod, formatDate, formatHours, formatMoney, monthRange, today } from '../../shared/format.ts';
+import { addDays, currentPeriod, formatDateRange, formatHours, formatMoney, monthRange, today } from '../../shared/format.ts';
 import { qs, request, useClients, useCreateInvoice, useEntries, useSettings } from '../api.ts';
 import { ClientSelect, EmptyState, PageHeader } from '../components/common.tsx';
 import { periodPresets } from '../utils.ts';
@@ -194,11 +194,14 @@ export function InvoiceNewPage() {
                           <Checkbox checked={selected.has(e.id)} onChange={() => toggle(e.id)} onClick={(ev) => ev.stopPropagation()} />
                         </Table.Td>
                         <Table.Td w={100}>
-                          <Text size="sm">{formatDate(e.date)}</Text>
+                          <Text size="sm">{formatDateRange(e.date, e.dateTo)}</Text>
                         </Table.Td>
                         <Table.Td>
-                          <Text size="sm">{e.description || '—'}</Text>
-                          {e.maintenanceId && (
+                          <Text size="sm">
+                            {e.project && <b>{e.project}: </b>}
+                            {e.description || (e.project ? '' : '—')}
+                          </Text>
+                          {e.kind === 'maintenance' && (
                             <Badge size="xs" variant="light" color="violet" leftSection={<IconRepeat size={10} />}>
                               održavanje
                             </Badge>

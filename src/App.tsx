@@ -4,7 +4,7 @@ import {
   IconLayoutDashboard,
   IconClockHour4,
   IconUsers,
-  IconRepeat,
+  IconChartBar,
   IconFileInvoice,
   IconReportAnalytics,
   IconSettings,
@@ -14,11 +14,12 @@ import {
   IconLogout,
   IconAlertTriangle,
 } from '@tabler/icons-react';
-import { Link, Route, Routes, useLocation } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { DashboardPage } from './pages/Dashboard.tsx';
 import { EntriesPage } from './pages/Entries.tsx';
 import { ClientsPage } from './pages/Clients.tsx';
-import { MaintenancePage } from './pages/Maintenance.tsx';
+import { ClientDetailPage } from './pages/ClientDetail.tsx';
+import { StatsPage } from './pages/Stats.tsx';
 import { InvoicesPage } from './pages/Invoices.tsx';
 import { InvoiceNewPage } from './pages/InvoiceNew.tsx';
 import { InvoiceDetailPage } from './pages/InvoiceDetail.tsx';
@@ -29,10 +30,10 @@ import { LoginPage } from './pages/Login.tsx';
 
 const NAV = [
   { to: '/', label: 'Pregled', icon: IconLayoutDashboard },
-  { to: '/sati', label: 'Unos sati', icon: IconClockHour4 },
+  { to: '/sati', label: 'Unos', icon: IconClockHour4 },
   { to: '/klijenti', label: 'Klijenti', icon: IconUsers },
-  { to: '/odrzavanja', label: 'Obavezna održavanja', icon: IconRepeat },
   { to: '/fakture', label: 'Fakture', icon: IconFileInvoice },
+  { to: '/statistika', label: 'Statistika', icon: IconChartBar },
   { to: '/izvestaji', label: 'Izveštaji', icon: IconReportAnalytics },
   { to: '/podesavanja', label: 'Podešavanja', icon: IconSettings },
 ];
@@ -131,7 +132,9 @@ function Shell({ canLogout }: { canLogout: boolean }) {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/sati" element={<EntriesPage />} />
           <Route path="/klijenti" element={<ClientsPage />} />
-          <Route path="/odrzavanja" element={<MaintenancePage />} />
+          <Route path="/klijenti/:id" element={<ClientDetailPage />} />
+          <Route path="/odrzavanja" element={<Navigate to="/klijenti" replace />} />
+          <Route path="/statistika" element={<StatsPage />} />
           <Route path="/fakture" element={<InvoicesPage />} />
           <Route path="/fakture/nova" element={<InvoiceNewPage />} />
           <Route path="/fakture/:id" element={<InvoiceDetailPage />} />

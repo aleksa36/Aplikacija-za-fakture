@@ -34,12 +34,12 @@ import {
 } from '@tabler/icons-react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { InvoiceItem, InvoiceStatus, InvoiceUpdateInput } from '../../shared/types.ts';
-import { formatDate, formatHours, formatMoney, today } from '../../shared/format.ts';
-import { type InvoiceWithEntries, notifyError, useDeleteInvoice, useInvoice, useInvoiceStatus, useUpdateInvoice } from '../api.ts';
+import { formatDate, formatDateRange, formatHours, formatMoney, today } from '../../shared/format.ts';
+import { type InvoiceWithEntries, notifyError, useDeleteInvoices, useInvoice, useInvoiceStatus, useUpdateInvoice } from '../api.ts';
 import { downloadInvoicePdf, invoiceDocument, openInvoicePdf, usePdfUrl } from '../pdf/index.ts';
 import { EmptyState, PageHeader } from '../components/common.tsx';
 import { STATUS_LABEL } from '../utils.ts';
-import { StatusBadge } from './Invoices.tsx';
+import { openDeleteInvoices, StatusBadge } from './Invoices.tsx';
 
 export function InvoiceDetailPage() {
   const { id } = useParams();
@@ -48,7 +48,7 @@ export function InvoiceDetailPage() {
   const invoice = useInvoice(invoiceId);
   const update = useUpdateInvoice();
   const setStatus = useInvoiceStatus();
-  const del = useDeleteInvoice();
+  const del = useDeleteInvoices();
   const [form, setForm] = useState<InvoiceUpdateInput | null>(null);
   const [tab, setTab] = useState<string | null>('edit');
   const [dirty, setDirty] = useState(false);
@@ -118,19 +118,7 @@ export function InvoiceDetailPage() {
   };
 
   const confirmDelete = () =>
-    modals.openConfirmModal({
-      title: 'Brisanje fakture',
-      children: (
-        <Text size="sm">
-          Trajno obrisati fakturu <b>{inv.number}</b>? Stavke rada se vraćaju u nefakturisane. Ako je faktura već poslata
-          klijentu, bolje je da je stornirate.
-        </Text>
-      ),
-      labels: { confirm: 'Obriši', cancel: 'Otkaži' },
-      confirmProps: { color: 'red' },
-      onConfirm: () => del.mutate(invoiceId, { onSuccess: () => navigate('/fakture') }),
-    });
-
+    openDeleteInvoices([inv], (entries) => del.mutate({ ids: [invoiceId], entries }, { onSuccess: () => navigate('/fakture') }));
 
   return (
     <>
@@ -398,7 +386,7 @@ export function InvoiceDetailPage() {
                 <Table.Tbody>
                   {inv.entries.map((e) => (
                     <Table.Tr key={e.id}>
-                      <Table.Td>{formatDate(e.date)}</Table.Td>
+                      <Table.Td>{formatDateRange(e.date, e.dateTo)}</Table.Td>
                       <Table.Td>{e.description}</Table.Td>
                       <Table.Td className="num">{e.hours ? formatHours(e.hours) : '—'}</Table.Td>
                       <Table.Td className="num">{formatMoney(e.value ?? 0, cur)}</Table.Td>

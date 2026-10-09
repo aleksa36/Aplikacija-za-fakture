@@ -1,5 +1,5 @@
 import { ENTRY_SELECT, getSettings, mapClient, mapEntry, round2, type Db, type Param, type Row } from './db.ts';
-import { formatDate, formatInvoiceNumber } from '../shared/format.ts';
+import { formatDate, formatDateRange, formatInvoiceNumber } from '../shared/format.ts';
 import type {
   Client,
   Entry,
@@ -187,13 +187,24 @@ export function buildItems(
   const fixed = entries.filter((e) => e.fixedAmount !== null);
   const hourly = entries.filter((e) => e.fixedAmount === null && e.hours > 0);
 
+  // Opis stavke: projekat i opis; ako su prazni, opšti opis usluge.
+  const label = (e: Entry) =>
+    [e.project, e.description].filter((s) => s && s.trim()).join(' – ') ||
+    (lang === 'en' ? settings.serviceDescriptionEn : settings.serviceDescription);
+  const withRange = (e: Entry) => (e.dateTo ? ` (${formatDateRange(e.date, e.dateTo, lang)})` : '');
+
   if (grouping === 'detailed') {
     for (const e of entries) {
       if (e.fixedAmount !== null) {
-        items.push({ description: e.description, quantity: 1, unit: pieceUnit, unitPrice: e.fixedAmount });
+        items.push({
+          description: e.kind === 'maintenance' ? e.description || label(e) : `${label(e)}${withRange(e)}`,
+          quantity: 1,
+          unit: pieceUnit,
+          unitPrice: e.fixedAmount,
+        });
       } else if (e.hours > 0) {
         items.push({
-          description: `${formatDate(e.date, lang)} – ${e.description}`.trim(),
+          description: `${formatDateRange(e.date, e.dateTo, lang)} – ${label(e)}`,
           quantity: e.hours,
           unit: hourUnit,
           unitPrice: e.effectiveRate ?? client.hourlyRate,
@@ -203,11 +214,14 @@ export function buildItems(
     return items;
   }
 
-  // Grupisano: sati po satnici u jednu stavku, paušalne stavke posebno.
-  const byRate = new Map<number, number>();
+  // Grupisano: sati po projektu i satnici u jednu stavku, paušalne stavke posebno.
+  const groups = new Map<string, { project: string; rate: number; hours: number }>();
   for (const e of hourly) {
     const rate = e.effectiveRate ?? client.hourlyRate;
-    byRate.set(rate, (byRate.get(rate) ?? 0) + e.hours);
+    const key = `${e.project}|${rate}`;
+    const g = groups.get(key) ?? { project: e.project, rate, hours: 0 };
+    g.hours += e.hours;
+    groups.set(key, g);
   }
   const base = lang === 'en' ? settings.serviceDescriptionEn : settings.serviceDescription;
   const periodText =
@@ -216,11 +230,21 @@ export function buildItems(
         ? ` for the period ${formatDate(period.from, lang)} – ${formatDate(period.to, lang)}`
         : ` za period ${formatDate(period.from, lang)} – ${formatDate(period.to, lang)}`
       : '';
-  for (const [rate, hours] of byRate) {
-    items.push({ description: `${base}${periodText}`, quantity: round2(hours), unit: hourUnit, unitPrice: rate });
+  for (const g of groups.values()) {
+    items.push({
+      description: `${base}${g.project ? ` – ${g.project}` : ''}${periodText}`,
+      quantity: round2(g.hours),
+      unit: hourUnit,
+      unitPrice: g.rate,
+    });
   }
   for (const e of fixed) {
-    items.push({ description: e.description, quantity: 1, unit: pieceUnit, unitPrice: e.fixedAmount! });
+    items.push({
+      description: e.kind === 'maintenance' ? e.description || label(e) : `${label(e)}${withRange(e)}`,
+      quantity: 1,
+      unit: pieceUnit,
+      unitPrice: e.fixedAmount!,
+    });
   }
   return items;
 }
@@ -342,10 +366,13 @@ export async function updateInvoice(db: Db, id: number, input: InvoiceUpdateInpu
   return getInvoice(db, id);
 }
 
-export async function deleteInvoice(db: Db, id: number) {
+/** Briše fakture. Unosi sa njih se brišu (deleteEntries) ili vraćaju u nefakturisane. */
+export async function deleteInvoices(db: Db, ids: number[], deleteEntries: boolean) {
+  if (!ids.length) return;
+  const list = ids.map(() => '?').join(', ');
   await db.tx(async (tx) => {
-    await getInvoice(tx, id);
-    await tx.query('UPDATE entries SET invoice_id = NULL WHERE invoice_id = ?', [id]);
-    await tx.query('DELETE FROM invoices WHERE id = ?', [id]);
+    if (deleteEntries) await tx.query(`DELETE FROM entries WHERE invoice_id IN (${list})`, ids);
+    else await tx.query(`UPDATE entries SET invoice_id = NULL WHERE invoice_id IN (${list})`, ids);
+    await tx.query(`DELETE FROM invoices WHERE id IN (${list})`, ids);
   });
 }

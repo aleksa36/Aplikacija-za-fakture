@@ -13,14 +13,22 @@ export function workReportTable(entries: Entry[], lang: Lang, color: string, cur
 
   const rows: TableCell[][] = entries.map((e) => {
     const isFlat = e.fixedAmount !== null;
-    const tags = [e.maintenanceId ? L.maintenance : null, isFlat ? L.flat : null].filter(Boolean).join(', ');
-    const dateText = e.date === prevDate ? '' : formatDate(e.date, lang);
-    prevDate = e.date;
+    const tags = e.kind === 'maintenance' ? L.maintenance : isFlat ? L.flat : '';
+    // Period od–do u dva reda; isti datum zaredom se ne ponavlja.
+    const key = `${e.date}|${e.dateTo ?? ''}`;
+    const dateCell: TableCell =
+      key === prevDate
+        ? { text: '' }
+        : e.dateTo
+          ? { stack: [{ text: formatDate(e.date, lang), noWrap: true }, { text: `– ${formatDate(e.dateTo, lang)}`, noWrap: true }] }
+          : { text: formatDate(e.date, lang), noWrap: true };
+    prevDate = key;
     const row: TableCell[] = [
-      { text: dateText, noWrap: true },
+      dateCell,
       {
         text: [
-          { text: e.description || '—' },
+          ...(e.project ? [{ text: `${e.project}: `, bold: true }] : []),
+          { text: e.description || (e.project ? '' : '—') },
           ...(tags ? [{ text: `  (${tags})`, color: COLORS.muted, fontSize: 8 }] : []),
         ],
       },
@@ -46,7 +54,7 @@ export function workReportTable(entries: Entry[], lang: Lang, color: string, cur
     table: {
       headerRows: 1,
       dontBreakRows: true,
-      widths: showAmounts ? [62, '*', 40, 90] : [62, '*', 50],
+      widths: showAmounts ? [66, '*', 40, 90] : [66, '*', 50],
       body: [header, ...rows, totalRow],
     },
     layout: tableLayout(color),

@@ -1,23 +1,24 @@
 import { Router, type Request } from 'express';
 import {
   ENTRY_SELECT,
+  ENTRY_VALUE_SQL,
   exportAll,
   getDb,
   getSettings,
   importAll,
   mapClient,
   mapEntry,
-  mapMaintenance,
+  mapTodo,
   round2,
   saveSettings,
   type Db,
   type Param,
 } from './db.ts';
-import { skipPausedPeriods, syncMaintenance } from './recurring.ts';
+import { syncMaintenance } from './recurring.ts';
 import {
   createInvoice,
   defaultInvoiceNotes,
-  deleteInvoice,
+  deleteInvoices,
   getInvoice,
   getInvoiceEntries,
   HttpError,
@@ -25,7 +26,7 @@ import {
   nextInvoiceNumber,
   updateInvoice,
 } from './invoices.ts';
-import { addDays, addMonths, currentPeriod, formatDate, monthRange, today } from '../shared/format.ts';
+import { addDays, addMonths, currentPeriod, formatDate, formatMonth, maintenanceTitle, monthRange, today } from '../shared/format.ts';
 import type {
   Client,
   ClientInput,
@@ -35,18 +36,25 @@ import type {
   InvoiceCreateInput,
   InvoiceStatus,
   InvoiceUpdateInput,
-  MaintenanceInput,
   MoneyByCurrency,
+  Stats,
 } from '../shared/types.ts';
 
 export const api = Router();
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_MONTH = /^\d{4}-\d{2}$/;
+const MAX_HOURS = 100_000;
 
 function id(req: Request): number {
   const n = Number(req.params.id);
   if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'Neispravan ID.');
   return n;
+}
+
+function ids(v: unknown): number[] {
+  if (!Array.isArray(v)) throw new HttpError(400, 'Nedostaje lista ID-jeva.');
+  return [...new Set(v.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
 }
 
 function str(v: unknown): string {
@@ -76,6 +84,11 @@ function optDate(v: unknown): string | null {
   return ISO_DATE.test(s) ? s : null;
 }
 
+function optMonth(v: unknown): string | null {
+  const s = str(v).slice(0, 7);
+  return ISO_MONTH.test(s) ? s : null;
+}
+
 async function getClientOr404(db: Db, clientId: number): Promise<Client> {
   const row = await db.one('SELECT * FROM clients WHERE id = ?', [clientId]);
   if (!row) throw new HttpError(404, 'Klijent ne postoji.');
@@ -86,6 +99,10 @@ function sumByCurrency(rows: { currency: Currency; amount: number }[]): MoneyByC
   const map = new Map<Currency, number>();
   for (const r of rows) map.set(r.currency, (map.get(r.currency) ?? 0) + r.amount);
   return [...map].map(([currency, amount]) => ({ currency, amount: round2(amount) })).filter((m) => m.amount !== 0);
+}
+
+function placeholders(list: unknown[]): string {
+  return list.map(() => '?').join(', ');
 }
 
 // ---------- Podešavanja ----------
@@ -105,6 +122,7 @@ api.put('/settings', async (req, res) => {
 function clientInput(b: Record<string, unknown>): ClientInput {
   const name = str(b.name);
   if (!name) throw new HttpError(400, 'Naziv klijenta je obavezan.');
+  const maintenanceAmount = Math.max(0, num(b.maintenanceAmount));
   return {
     name,
     address: str(b.address),
@@ -125,35 +143,45 @@ function clientInput(b: Record<string, unknown>): ClientInput {
     notes: str(b.notes),
     color: str(b.color) || 'blue',
     archived: !!b.archived,
+    maintenanceAmount,
+    maintenanceLabel: str(b.maintenanceLabel) || 'Mesečno održavanje',
+    // Ako održavanje postoji a početak nije zadat, kreće od tekućeg meseca.
+    maintenanceStart: maintenanceAmount > 0 ? (optMonth(b.maintenanceStart) ?? currentPeriod()) : null,
   };
 }
 
 const CLIENT_FIELDS = `name, address, city, zip, country, pib, mb, email, phone, contact_person, hourly_rate,
-  currency, payment_days, language, vat_exempt, invoice_note, notes, color, archived`;
+  currency, payment_days, language, vat_exempt, invoice_note, notes, color, archived,
+  maintenance_amount, maintenance_label, maintenance_start`;
 
 function clientValues(c: ClientInput): Param[] {
   return [
     c.name, c.address, c.city, c.zip, c.country, c.pib, c.mb, c.email, c.phone, c.contactPerson, c.hourlyRate,
     c.currency, c.paymentDays, c.language, c.vatExempt, c.invoiceNote, c.notes, c.color, c.archived,
+    c.maintenanceAmount, c.maintenanceLabel, c.maintenanceStart,
   ];
 }
 
+const CLIENT_SELECT = `
+  SELECT c.*, (SELECT COUNT(*)::int FROM todos t WHERE t.client_id = c.id AND NOT t.done) AS open_todos
+  FROM clients c`;
+
 api.get('/clients', async (_req, res) => {
   const db = await getDb();
-  res.json((await db.query('SELECT * FROM clients ORDER BY archived, lower(name)')).map(mapClient));
+  res.json((await db.query(`${CLIENT_SELECT} ORDER BY c.archived, lower(c.name)`)).map(mapClient));
 });
 
 api.get('/clients/:id', async (req, res) => {
-  res.json(await getClientOr404(await getDb(), id(req)));
+  const row = await (await getDb()).one(`${CLIENT_SELECT} WHERE c.id = ?`, [id(req)]);
+  if (!row) throw new HttpError(404, 'Klijent ne postoji.');
+  res.json(mapClient(row));
 });
 
 api.post('/clients', async (req, res) => {
   const db = await getDb();
   const values = clientValues(clientInput(req.body ?? {}));
-  const row = await db.one(
-    `INSERT INTO clients (${CLIENT_FIELDS}) VALUES (${values.map(() => '?').join(', ')}) RETURNING *`,
-    values,
-  );
+  const row = await db.one(`INSERT INTO clients (${CLIENT_FIELDS}) VALUES (${placeholders(values)}) RETURNING *`, values);
+  await syncMaintenance(db);
   res.status(201).json(mapClient(row!));
 });
 
@@ -164,6 +192,7 @@ api.put('/clients/:id', async (req, res) => {
   const sets = CLIENT_FIELDS.split(',').map((f) => `${f.trim()} = ?`).join(', ');
   const row = await db.one(`UPDATE clients SET ${sets} WHERE id = ? RETURNING *`, [...values, clientId]);
   if (!row) throw new HttpError(404, 'Klijent ne postoji.');
+  await syncMaintenance(db);
   res.json(mapClient(row));
 });
 
@@ -171,35 +200,72 @@ api.delete('/clients/:id', async (req, res) => {
   const db = await getDb();
   const clientId = id(req);
   const inv = await db.one<{ n: number }>('SELECT COUNT(*)::int AS n FROM invoices WHERE client_id = ?', [clientId]);
-  if (inv && inv.n > 0) throw new HttpError(409, 'Klijent ima fakture i ne može se obrisati. Arhivirajte ga umesto toga.');
+  if (inv && inv.n > 0) throw new HttpError(409, 'Klijent ima fakture i ne može se obrisati. Obrišite prvo fakture ili ga arhivirajte.');
   await db.query('DELETE FROM clients WHERE id = ?', [clientId]);
   res.status(204).end();
 });
 
-// ---------- Stavke rada (sati) ----------
+// ---------- Unosi (sati, paušal, mesečno održavanje) ----------
 
-async function entryInput(db: Db, b: Record<string, unknown>): Promise<EntryInput> {
-  const clientId = num(b.clientId);
-  await getClientOr404(db, clientId);
+async function entryInput(db: Db, b: Record<string, unknown>): Promise<EntryInput & { client: Client }> {
+  const client = await getClientOr404(db, num(b.clientId));
+  const project = str(b.project).slice(0, 100);
+
+  if (b.kind === 'maintenance') {
+    const period = optMonth(b.period);
+    if (!period) throw new HttpError(400, 'Izaberite mesec održavanja.');
+    const fixedAmount = optNum(b.fixedAmount) ?? (client.maintenanceAmount || null);
+    if (fixedAmount === null || fixedAmount <= 0) throw new HttpError(400, 'Unesite iznos održavanja.');
+    return {
+      client,
+      kind: 'maintenance',
+      clientId: client.id,
+      period,
+      date: `${period}-01`,
+      dateTo: null,
+      project,
+      description: str(b.description) || maintenanceTitle(client.maintenanceLabel, period, client.language),
+      hours: Math.max(0, round2(num(b.hours))),
+      rate: null,
+      fixedAmount,
+    };
+  }
+
+  const from = date(b.date, 'od');
+  const to = optDate(b.dateTo);
+  if (to && to < from) throw new HttpError(400, 'Datum "do" ne može biti pre datuma "od".');
   const hours = round2(num(b.hours));
   const fixedAmount = optNum(b.fixedAmount);
-  if (hours < 0 || hours > 24) throw new HttpError(400, 'Broj sati mora biti između 0 i 24.');
+  if (hours < 0 || hours > MAX_HOURS) throw new HttpError(400, 'Neispravan broj sati.');
   if (hours === 0 && fixedAmount === null) throw new HttpError(400, 'Unesite broj sati ili paušalni iznos.');
+  if (fixedAmount !== null && fixedAmount < 0) throw new HttpError(400, 'Iznos ne može biti negativan.');
   return {
-    clientId,
-    date: date(b.date, 'datum'),
+    client,
+    kind: 'manual',
+    clientId: client.id,
+    period: null,
+    date: from,
+    dateTo: to && to !== from ? to : null,
+    project,
     description: str(b.description),
     hours,
-    rate: optNum(b.rate),
+    rate: fixedAmount === null ? optNum(b.rate) : null,
     fixedAmount,
-    billable: b.billable === undefined ? true : !!b.billable,
   };
 }
 
 async function getEntryOr404(db: Db, entryId: number) {
   const row = await db.one(`${ENTRY_SELECT} WHERE e.id = ?`, [entryId]);
-  if (!row) throw new HttpError(404, 'Stavka ne postoji.');
+  if (!row) throw new HttpError(404, 'Unos ne postoji.');
   return mapEntry(row);
+}
+
+async function assertMaintenanceFree(db: Db, clientId: number, period: string, excludeId = 0) {
+  const row = await db.one(
+    `SELECT id FROM entries WHERE kind = 'maintenance' AND client_id = ? AND period = ? AND id <> ?`,
+    [clientId, period, excludeId],
+  );
+  if (row) throw new HttpError(409, `Održavanje za ${formatMonth(period)} je već upisano za ovog klijenta.`);
 }
 
 api.get('/entries', async (req, res) => {
@@ -221,9 +287,13 @@ api.get('/entries', async (req, res) => {
     params.push(str(q.to));
   }
   if (q.unbilled === '1') where.push('e.invoice_id IS NULL AND e.billable');
+  if (q.project !== undefined && q.project !== '') {
+    where.push('e.project = ?');
+    params.push(str(q.project));
+  }
   if (q.search) {
-    where.push('e.description ILIKE ?');
-    params.push(`%${str(q.search)}%`);
+    where.push('(e.description ILIKE ? OR e.project ILIKE ?)');
+    params.push(`%${str(q.search)}%`, `%${str(q.search)}%`);
   }
   const rows = await db.query(
     `${ENTRY_SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY e.date DESC, e.id DESC`,
@@ -232,115 +302,123 @@ api.get('/entries', async (req, res) => {
   res.json(rows.map(mapEntry));
 });
 
+/** Nazivi projekata (za predloge pri unosu). */
+api.get('/projects', async (req, res) => {
+  const db = await getDb();
+  const clientId = optNum(req.query.clientId);
+  const rows = await db.query<{ project: string }>(
+    `SELECT project FROM entries WHERE project <> '' ${clientId ? 'AND client_id = ?' : ''}
+     GROUP BY project ORDER BY MAX(date) DESC LIMIT 100`,
+    clientId ? [clientId] : [],
+  );
+  res.json(rows.map((r) => r.project));
+});
+
 api.post('/entries', async (req, res) => {
   const db = await getDb();
   const e = await entryInput(db, req.body ?? {});
-  const row = await db.one<{ id: number }>(
-    `INSERT INTO entries (client_id, date, description, hours, rate, fixed_amount, billable)
-     VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-    [e.clientId, e.date, e.description, e.hours, e.rate, e.fixedAmount, e.billable],
-  );
-  res.status(201).json(await getEntryOr404(db, row!.id));
+  const entryId = await db.tx(async (tx) => {
+    if (e.kind === 'maintenance') {
+      await assertMaintenanceFree(tx, e.clientId, e.period!);
+      // Zabeleži mesec da ga automatski upis ne bi dodao još jednom.
+      await tx.query('INSERT INTO maintenance_log (client_id, period) VALUES (?, ?) ON CONFLICT DO NOTHING', [e.clientId, e.period]);
+    }
+    const row = await tx.one<{ id: number }>(
+      `INSERT INTO entries (client_id, kind, period, date, date_to, project, description, hours, rate, fixed_amount, billable)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, true) RETURNING id`,
+      [e.clientId, e.kind, e.period, e.date, e.dateTo, e.project, e.description, e.hours, e.rate, e.fixedAmount],
+    );
+    return row!.id;
+  });
+  res.status(201).json(await getEntryOr404(db, entryId));
 });
 
 api.put('/entries/:id', async (req, res) => {
   const db = await getDb();
   const entryId = id(req);
   const existing = await getEntryOr404(db, entryId);
-  if (existing.invoiceId) throw new HttpError(409, `Stavka je na fakturi ${existing.invoiceNumber} i ne može se menjati.`);
+  if (existing.invoiceId) {
+    throw new HttpError(409, `Unos je na fakturi ${existing.invoiceNumber} i ne može se menjati. Možete ga obrisati.`);
+  }
   const e = await entryInput(db, req.body ?? {});
-  await db.query(
-    `UPDATE entries SET client_id = ?, date = ?, description = ?, hours = ?, rate = ?, fixed_amount = ?, billable = ?
-     WHERE id = ?`,
-    [e.clientId, e.date, e.description, e.hours, e.rate, e.fixedAmount, e.billable, entryId],
-  );
+  await db.tx(async (tx) => {
+    if (e.kind === 'maintenance') {
+      await assertMaintenanceFree(tx, e.clientId, e.period!, entryId);
+      await tx.query('INSERT INTO maintenance_log (client_id, period) VALUES (?, ?) ON CONFLICT DO NOTHING', [e.clientId, e.period]);
+    }
+    await tx.query(
+      `UPDATE entries SET client_id = ?, kind = ?, period = ?, date = ?, date_to = ?, project = ?, description = ?,
+         hours = ?, rate = ?, fixed_amount = ? WHERE id = ?`,
+      [e.clientId, e.kind, e.period, e.date, e.dateTo, e.project, e.description, e.hours, e.rate, e.fixedAmount, entryId],
+    );
+  });
   res.json(await getEntryOr404(db, entryId));
 });
 
+// Brisanje je dozvoljeno i za fakturisane unose (faktura zadržava svoje stavke).
 api.delete('/entries/:id', async (req, res) => {
-  const db = await getDb();
-  const entryId = id(req);
-  const existing = await getEntryOr404(db, entryId);
-  if (existing.invoiceId) throw new HttpError(409, `Stavka je na fakturi ${existing.invoiceNumber} i ne može se obrisati.`);
-  await db.query('DELETE FROM entries WHERE id = ?', [entryId]);
+  await (await getDb()).query('DELETE FROM entries WHERE id = ?', [id(req)]);
   res.status(204).end();
 });
 
-// ---------- Obavezna održavanja ----------
-
-async function maintenanceInput(db: Db, b: Record<string, unknown>): Promise<MaintenanceInput> {
-  const clientId = num(b.clientId);
-  await getClientOr404(db, clientId);
-  const description = str(b.description);
-  if (!description) throw new HttpError(400, 'Opis održavanja je obavezan.');
-  const hours = round2(num(b.hours));
-  const fixedAmount = optNum(b.fixedAmount);
-  if (hours <= 0 && fixedAmount === null) throw new HttpError(400, 'Unesite broj sati ili paušalni iznos.');
-  const intervalMonths = Math.round(num(b.intervalMonths, 1));
-  if (![1, 2, 3, 6, 12].includes(intervalMonths)) throw new HttpError(400, 'Neispravan interval.');
-  return {
-    clientId,
-    description,
-    hours,
-    fixedAmount,
-    intervalMonths,
-    dayOfMonth: Math.min(31, Math.max(1, Math.round(num(b.dayOfMonth, 1)))),
-    startDate: date(b.startDate, 'početak'),
-    endDate: optDate(b.endDate),
-    active: b.active === undefined ? true : !!b.active,
-  };
-}
-
-const MAINTENANCE_SELECT = `
-  SELECT m.*, c.name AS client_name,
-         (SELECT MAX(period) FROM maintenance_runs r WHERE r.maintenance_id = m.id AND r.entry_id IS NOT NULL) AS last_period
-  FROM maintenance m JOIN clients c ON c.id = m.client_id`;
-
-async function getMaintenanceOr404(db: Db, mid: number) {
-  const row = await db.one(`${MAINTENANCE_SELECT} WHERE m.id = ?`, [mid]);
-  if (!row) throw new HttpError(404, 'Održavanje ne postoji.');
-  return mapMaintenance(row);
-}
-
-api.get('/maintenance', async (_req, res) => {
-  const db = await getDb();
-  res.json((await db.query(`${MAINTENANCE_SELECT} ORDER BY m.active DESC, lower(c.name)`)).map(mapMaintenance));
+api.post('/entries/bulk-delete', async (req, res) => {
+  const list = ids(req.body?.ids);
+  if (list.length) await (await getDb()).query(`DELETE FROM entries WHERE id IN (${placeholders(list)})`, list);
+  res.json({ deleted: list.length });
 });
 
-api.post('/maintenance', async (req, res) => {
+// ---------- Zadaci (todo lista po klijentu) ----------
+
+const TODO_SELECT = `
+  SELECT t.*, c.name AS client_name, c.color AS client_color
+  FROM todos t JOIN clients c ON c.id = t.client_id`;
+
+api.get('/todos', async (req, res) => {
   const db = await getDb();
-  const m = await maintenanceInput(db, req.body ?? {});
-  const row = await db.one<{ id: number }>(
-    `INSERT INTO maintenance (client_id, description, hours, fixed_amount, interval_months, day_of_month,
-       start_date, end_date, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-    [m.clientId, m.description, m.hours, m.fixedAmount, m.intervalMonths, m.dayOfMonth, m.startDate, m.endDate, m.active],
+  const where: string[] = [];
+  const params: Param[] = [];
+  if (req.query.clientId) {
+    where.push('t.client_id = ?');
+    params.push(num(req.query.clientId));
+  }
+  if (req.query.open === '1') where.push('NOT t.done');
+  const rows = await db.query(
+    `${TODO_SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+     ORDER BY t.done, CASE WHEN t.done THEN t.done_at END DESC, t.created_at`,
+    params,
   );
-  const created = await syncMaintenance(db);
-  res.status(201).json({ ...(await getMaintenanceOr404(db, row!.id)), createdEntries: created });
+  res.json(rows.map(mapTodo));
 });
 
-api.put('/maintenance/:id', async (req, res) => {
+api.post('/todos', async (req, res) => {
   const db = await getDb();
-  const mid = id(req);
-  const existing = await getMaintenanceOr404(db, mid);
-  const m = await maintenanceInput(db, req.body ?? {});
-  await db.query(
-    `UPDATE maintenance SET client_id = ?, description = ?, hours = ?, fixed_amount = ?, interval_months = ?,
-       day_of_month = ?, start_date = ?, end_date = ?, active = ? WHERE id = ?`,
-    [m.clientId, m.description, m.hours, m.fixedAmount, m.intervalMonths, m.dayOfMonth, m.startDate, m.endDate, m.active, mid],
-  );
-  if (!existing.active && m.active) await skipPausedPeriods(db, mid);
-  const created = await syncMaintenance(db);
-  res.json({ ...(await getMaintenanceOr404(db, mid)), createdEntries: created });
+  const client = await getClientOr404(db, num(req.body?.clientId));
+  const text = str(req.body?.text).slice(0, 1000);
+  if (!text) throw new HttpError(400, 'Unesite tekst zadatka.');
+  const row = await db.one<{ id: number }>('INSERT INTO todos (client_id, text) VALUES (?, ?) RETURNING id', [client.id, text]);
+  res.status(201).json(mapTodo((await db.one(`${TODO_SELECT} WHERE t.id = ?`, [row!.id]))!));
 });
 
-api.delete('/maintenance/:id', async (req, res) => {
-  await (await getDb()).query('DELETE FROM maintenance WHERE id = ?', [id(req)]);
+api.patch('/todos/:id', async (req, res) => {
+  const db = await getDb();
+  const todoId = id(req);
+  const b = req.body ?? {};
+  if (typeof b.text === 'string') {
+    const text = str(b.text).slice(0, 1000);
+    if (!text) throw new HttpError(400, 'Unesite tekst zadatka.');
+    await db.query('UPDATE todos SET text = ? WHERE id = ?', [text, todoId]);
+  }
+  if (typeof b.done === 'boolean') {
+    await db.query(`UPDATE todos SET done = ?, done_at = CASE WHEN ? THEN now() ELSE NULL END WHERE id = ?`, [b.done, b.done, todoId]);
+  }
+  const row = await db.one(`${TODO_SELECT} WHERE t.id = ?`, [todoId]);
+  if (!row) throw new HttpError(404, 'Zadatak ne postoji.');
+  res.json(mapTodo(row));
+});
+
+api.delete('/todos/:id', async (req, res) => {
+  await (await getDb()).query('DELETE FROM todos WHERE id = ?', [id(req)]);
   res.status(204).end();
-});
-
-api.post('/maintenance/sync', async (_req, res) => {
-  res.json({ createdEntries: await syncMaintenance(await getDb()) });
 });
 
 // ---------- Fakture ----------
@@ -441,9 +519,95 @@ api.patch('/invoices/:id/status', async (req, res) => {
   );
 });
 
+/** ?entries=delete briše i unose sa fakture; inače se unosi vraćaju u nefakturisane. */
 api.delete('/invoices/:id', async (req, res) => {
-  await deleteInvoice(await getDb(), id(req));
+  await deleteInvoices(await getDb(), [id(req)], req.query.entries === 'delete');
   res.status(204).end();
+});
+
+api.post('/invoices/bulk-delete', async (req, res) => {
+  const list = ids(req.body?.ids);
+  await deleteInvoices(await getDb(), list, req.body?.entries === 'delete');
+  res.json({ deleted: list.length });
+});
+
+// ---------- Statistika ----------
+
+api.get('/stats', async (req, res) => {
+  const db = await getDb();
+  await syncMaintenance(db);
+  const year = today().slice(0, 4);
+  const from = optDate(req.query.from) ?? `${year}-01-01`;
+  const to = optDate(req.query.to) ?? `${year}-12-31`;
+  const clientId = optNum(req.query.clientId);
+  const where = `e.date >= ? AND e.date <= ?${clientId ? ' AND e.client_id = ?' : ''}`;
+  const params: Param[] = clientId ? [from, to, clientId] : [from, to];
+
+  const [months, clients, projects, invoiced] = await Promise.all([
+    db.query<{ month: string; client_id: number; hours: number }>(
+      `SELECT substr(e.date, 1, 7) AS month, e.client_id, SUM(e.hours) AS hours
+       FROM entries e WHERE ${where} GROUP BY 1, 2 ORDER BY 1`,
+      params,
+    ),
+    db.query<{ client_id: number; name: string; color: string; currency: Currency; hours: number; value: number; entries: number }>(
+      `SELECT c.id AS client_id, c.name, c.color, c.currency, SUM(e.hours) AS hours,
+              SUM(${ENTRY_VALUE_SQL}) AS value, COUNT(*)::int AS entries
+       FROM entries e JOIN clients c ON c.id = e.client_id WHERE ${where}
+       GROUP BY c.id ORDER BY hours DESC, value DESC`,
+      params,
+    ),
+    db.query<{
+      client_id: number; name: string; color: string; currency: Currency; project: string;
+      hours: number; value: number; entries: number; first_date: string; last_date: string;
+    }>(
+      `SELECT c.id AS client_id, c.name, c.color, c.currency,
+              CASE WHEN e.kind = 'maintenance' AND e.project = '' THEN '__maintenance' ELSE e.project END AS project,
+              SUM(e.hours) AS hours, SUM(${ENTRY_VALUE_SQL}) AS value, COUNT(*)::int AS entries,
+              MIN(e.date) AS first_date, MAX(COALESCE(e.date_to, e.date)) AS last_date
+       FROM entries e JOIN clients c ON c.id = e.client_id WHERE ${where}
+       GROUP BY c.id, 5 ORDER BY hours DESC, value DESC`,
+      params,
+    ),
+    db.query<{ currency: Currency; amount: number }>(
+      `SELECT i.currency, SUM(ii.quantity * ii.unit_price * (1 + i.vat_rate / 100)) AS amount
+       FROM invoices i JOIN invoice_items ii ON ii.invoice_id = i.id
+       WHERE i.status <> 'cancelled' AND i.issue_date >= ? AND i.issue_date <= ?${clientId ? ' AND i.client_id = ?' : ''}
+       GROUP BY i.currency`,
+      params,
+    ),
+  ]);
+
+  // Svi meseci u periodu (i oni bez rada), najviše poslednjih 36.
+  const byMonth: Stats['byMonth'] = [];
+  const lastMonth = to.slice(0, 7);
+  const firstMonth = [from.slice(0, 7), addMonths(lastMonth, -35)].sort()[1];
+  for (let m = firstMonth; m <= lastMonth; m = addMonths(m, 1)) {
+    const rows = months.filter((r) => r.month === m);
+    byMonth.push({
+      month: m,
+      hours: round2(rows.reduce((s, r) => s + r.hours, 0)),
+      byClient: rows.map((r) => ({ clientId: r.client_id, hours: round2(r.hours) })),
+    });
+  }
+
+  const stats: Stats = {
+    from,
+    to,
+    totalHours: round2(clients.reduce((s, c) => s + c.hours, 0)),
+    totalEntries: clients.reduce((s, c) => s + c.entries, 0),
+    value: sumByCurrency(clients.map((c) => ({ currency: c.currency, amount: c.value }))),
+    invoiced: sumByCurrency(invoiced),
+    byMonth,
+    byClient: clients.map((c) => ({
+      clientId: c.client_id, name: c.name, color: c.color, currency: c.currency,
+      hours: round2(c.hours), value: round2(c.value), entries: c.entries,
+    })),
+    byProject: projects.map((p) => ({
+      clientId: p.client_id, clientName: p.name, color: p.color, currency: p.currency, project: p.project,
+      hours: round2(p.hours), value: round2(p.value), entries: p.entries, firstDate: p.first_date, lastDate: p.last_date,
+    })),
+  };
+  res.json(stats);
 });
 
 // ---------- Izveštaji ----------
@@ -468,26 +632,27 @@ api.get('/reports/entries.csv', async (req, res) => {
     await db.query(`${ENTRY_SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY e.date, e.id`, params)
   ).map(mapEntry);
   const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const header = ['Datum', 'Klijent', 'Opis', 'Sati', 'Satnica', 'Paušal', 'Iznos', 'Valuta', 'Naplativo', 'Faktura', 'Održavanje'];
+  const header = ['Od', 'Do', 'Klijent', 'Projekat', 'Opis', 'Vrsta', 'Sati', 'Satnica', 'Paušal', 'Iznos', 'Valuta', 'Faktura'];
   const lines = entries.map((e) =>
     [
       formatDate(e.date),
+      formatDate(e.dateTo),
       e.clientName,
+      e.project,
       e.description,
+      e.kind === 'maintenance' ? 'održavanje' : e.fixedAmount === null ? 'sati' : 'paušal',
       String(e.hours).replace('.', ','),
       e.fixedAmount === null ? String(e.effectiveRate).replace('.', ',') : '',
       e.fixedAmount === null ? '' : String(e.fixedAmount).replace('.', ','),
       String(e.value).replace('.', ','),
       e.currency,
-      e.billable ? 'da' : 'ne',
       e.invoiceNumber ?? '',
-      e.maintenanceId ? 'da' : '',
     ]
       .map(esc)
       .join(';'),
   );
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="sati.csv"');
+  res.setHeader('Content-Disposition', 'attachment; filename="unosi.csv"');
   // BOM da bi Excel ispravno prikazao č, ć, š, ž, đ
   res.send('﻿' + [header.map(esc).join(';'), ...lines].join('\r\n'));
 });
@@ -503,7 +668,7 @@ api.get('/dashboard', async (_req, res) => {
   const t = today();
   const year = t.slice(0, 4);
 
-  const [hours, unbilledRows, unpaid, paid, monthRows, recent] = await Promise.all([
+  const [hours, unbilledRows, unpaid, paid, monthRows, recent, todos] = await Promise.all([
     db.one<{ this_month: number; last_month: number }>(
       `SELECT COALESCE(SUM(hours) FILTER (WHERE date >= ? AND date <= ?), 0) AS this_month,
               COALESCE(SUM(hours) FILTER (WHERE date >= ? AND date <= ?), 0) AS last_month
@@ -515,6 +680,7 @@ api.get('/dashboard', async (_req, res) => {
     listInvoices(db, { status: 'paid' }),
     db.query(`${ENTRY_SELECT} WHERE e.date >= ? AND e.date <= ? ORDER BY c.name`, [thisMonth.from, thisMonth.to]),
     db.query(`${ENTRY_SELECT} ORDER BY e.date DESC, e.id DESC LIMIT 8`),
+    db.query(`${TODO_SELECT} WHERE NOT t.done ORDER BY t.created_at LIMIT 12`),
   ]);
 
   const unbilledEntries = unbilledRows.map(mapEntry);
@@ -549,6 +715,7 @@ api.get('/dashboard', async (_req, res) => {
     perClient: [...perClient.values()].sort((a, b) => b.hours - a.hours),
     recentEntries: recent.map(mapEntry),
     overdueInvoices: overdue,
+    openTodos: todos.map(mapTodo),
   };
   res.json(result);
 });

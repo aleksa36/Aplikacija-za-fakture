@@ -6,13 +6,15 @@ Radi na **Netlify-ju sa Supabase bazom**, ali i lokalno na računaru bez ikakve 
 
 ## Mogućnosti
 
-- **Klijenti**: podaci za fakturu (adresa, PIB, MB), satnica, valuta (RSD/EUR/USD…), rok plaćanja, jezik fakture (srpski/engleski), napomena na fakturi, boja i arhiviranje.
-- **Unos sati**: brz unos (klijent, datum, sati, opis). Sati mogu da se kucaju kao `2,5`, `1:30`, `1h30` ili `90m`, a `Ctrl+Enter` čuva unos. Po potrebi možete zadati posebnu satnicu, paušalni iznos ili označiti unos kao nenaplativ. Stavka koja je već na fakturi se zaključava.
-- **Obavezna održavanja**: ponavljajuće stavke (mesečno, kvartalno, godišnje…) koje se **automatski upisuju** na zadati dan u mesecu, kao paušal ili kao sati. U opisu možete koristiti `{mesec}` i `{godina}`.
-- **Fakture**: automatski povlače nefakturisane sate i održavanja za izabrani period, numerišu se automatski (format se podešava), imaju statuse (nacrt → poslata → plaćena), mogu se stornirati, a stavke se mogu menjati.
-- **PDF**: faktura sa logom i akcentnom bojom, instrukcijama za plaćanje (dinarski račun ili IBAN/SWIFT za strane valute), PDV-om (ako ste obveznik) i opcionim **izveštajem o radu** kao drugom stranom. PDF se pravi direktno u browseru.
-- **Izveštaji**: pregled po periodu i klijentu, PDF izveštaj o radu za klijenta i izvoz u CSV za Excel.
-- **Pregled**: sati ovog meseca, nefakturisano, neplaćene fakture i one kojima je istekao rok, naplaćeno tokom godine.
+- **Dve vrste unosa**:
+  - **Ručni unos**: klijent, datum ili period (od–do), opcioni projekat i opis, pa **po satima** (bez ograničenja, npr. 120 h) ili **paušalno** (iznos).
+  - **Mesečno održavanje**: iznos se podešava kod klijenta i **sam se upisuje svakog meseca** sa naslovom „Mesečno održavanje – oktobar 2026”. Može se dodati i ručno za izabrani mesec, a naslov se popunjava sam.
+- **Klijenti**: podaci za fakturu (adresa, PIB, MB), satnica, valuta, rok plaćanja, jezik fakture (srpski/engleski) i mesečno održavanje. Svaki klijent ima svoju stranicu sa **todo listom** (šta treba uraditi), statistikom, projektima i fakturama.
+- **Statistika**: sati po mesecima (grafikon i tabela), po klijentima i po projektima, za izabrani period.
+- **Fakture**: automatski povlače nefakturisane unose za period, numerišu se automatski, imaju statuse (nacrt → poslata → plaćena) i storno, a stavke se mogu menjati.
+- **PDF**: faktura sa logom, instrukcijama za plaćanje, **IPS QR kodom** za dinarske fakture (klijent skenira kod u m-banking aplikaciji), PDV-om (ako ste obveznik) i opcionim izveštajem o radu.
+- **Brisanje starih podataka**: fakture i unosi se mogu brisati pojedinačno ili grupno (izbor više stavki). Pri brisanju fakture birate da li se brišu i njeni unosi.
+- **Izveštaji**: PDF izveštaj o radu za klijenta i izvoz u CSV za Excel.
 - **Prijava lozinkom** i **rezervna kopija** (izvoz i uvoz svih podataka u JSON datoteci).
 
 ## Postavljanje na Netlify + Supabase
@@ -68,12 +70,12 @@ Produkcija na sopstvenom serveru: `npm run build && npm start` (http://localhost
 server/              Express API i baza (Postgres preko postgres.js ili PGlite)
   db.ts              konekcija, migracije, izvoz/uvoz
   auth.ts            prijava lozinkom (potpisan kolačić)
-  recurring.ts       automatski upis obaveznih održavanja
+  recurring.ts       automatski upis mesečnog održavanja
   invoices.ts        kreiranje faktura i numerisanje
 netlify/functions/   Netlify funkcija koja pokreće isti Express API
 shared/              tipovi i formatiranje (zajedničko za server i frontend)
 src/                 React + Mantine frontend
-  pdf/               izgled fakture i izveštaja (pdfmake, sr/en)
+  pdf/               izgled fakture i izveštaja (pdfmake, sr/en), IPS QR kod
 ```
 
 ## Napomena o e-fakturama (SEF)

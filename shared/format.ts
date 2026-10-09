@@ -95,3 +95,19 @@ export function formatInvoiceNumber(format: string, seq: number, issueDate: stri
     .replace(/\{yy\}/g, yyyy.slice(2))
     .replace(/\{mm\}/g, mm);
 }
+
+/** Period od–do: "01.10. – 15.10.2026." (ili samo jedan datum ako je isti dan). */
+export function formatDateRange(from: string, to: string | null | undefined, lang: Lang = 'sr'): string {
+  if (!to || to === from) return formatDate(from, lang);
+  if (from.slice(0, 4) === to.slice(0, 4)) {
+    const short = lang === 'en' ? formatDate(from, lang).slice(0, -5) : formatDate(from, lang).slice(0, 6);
+    return `${short} – ${formatDate(to, lang)}`;
+  }
+  return `${formatDate(from, lang)} – ${formatDate(to, lang)}`;
+}
+
+/** Naslov stavke mesečnog održavanja, npr. "Mesečno održavanje – oktobar 2026". */
+export function maintenanceTitle(label: string, period: string, lang: Lang = 'sr'): string {
+  const base = label.trim() || (lang === 'en' ? 'Monthly maintenance' : 'Mesečno održavanje');
+  return `${base} – ${formatMonth(period, lang)}`;
+}

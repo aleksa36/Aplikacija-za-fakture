@@ -35,6 +35,8 @@ export interface Settings {
   defaultInvoiceNoteEn: string;
   serviceDescription: string; // opis grupisane stavke na fakturi (sr)
   serviceDescriptionEn: string;
+  ipsQr: boolean; // IPS QR kod za plaćanje na dinarskim fakturama
+  paymentCode: string; // šifra plaćanja za IPS QR (npr. 221)
 }
 
 export interface Client {
@@ -58,21 +60,33 @@ export interface Client {
   notes: string;
   color: string;
   archived: boolean;
+  /** Mesečno održavanje: iznos koji se automatski upisuje svakog meseca (0 = nema). */
+  maintenanceAmount: number;
+  maintenanceLabel: string;
+  /** Prvi mesec održavanja, "YYYY-MM". */
+  maintenanceStart: string | null;
   createdAt: string;
+  openTodos?: number;
 }
 
-export type ClientInput = Omit<Client, 'id' | 'createdAt'>;
+export type ClientInput = Omit<Client, 'id' | 'createdAt' | 'openTodos'>;
+
+/** manual = ručni unos (sati ili paušal, od–do), maintenance = mesečno održavanje. */
+export type EntryKind = 'manual' | 'maintenance';
 
 export interface Entry {
   id: number;
   clientId: number;
-  date: string; // YYYY-MM-DD
+  kind: EntryKind;
+  date: string; // YYYY-MM-DD (početak)
+  dateTo: string | null; // kraj perioda za ručni unos (ako je duži od jednog dana)
+  period: string | null; // "YYYY-MM" za mesečno održavanje
+  project: string;
   description: string;
   hours: number;
   rate: number | null; // ako je null koristi se satnica klijenta
   fixedAmount: number | null; // paušalni iznos umesto sati × satnica
   billable: boolean;
-  maintenanceId: number | null;
   invoiceId: number | null;
   invoiceNumber?: string | null;
   createdAt: string;
@@ -84,28 +98,29 @@ export interface Entry {
   clientColor?: string;
 }
 
-export type EntryInput = Pick<
-  Entry,
-  'clientId' | 'date' | 'description' | 'hours' | 'rate' | 'fixedAmount' | 'billable'
->;
-
-export interface Maintenance {
-  id: number;
+export interface EntryInput {
+  kind: EntryKind;
   clientId: number;
+  date: string;
+  dateTo: string | null;
+  period: string | null;
+  project: string;
   description: string;
   hours: number;
+  rate: number | null;
   fixedAmount: number | null;
-  intervalMonths: number; // 1 = mesečno, 3 = kvartalno, 12 = godišnje
-  dayOfMonth: number;
-  startDate: string;
-  endDate: string | null;
-  active: boolean;
-  createdAt: string;
-  clientName?: string;
-  lastPeriod?: string | null;
 }
 
-export type MaintenanceInput = Omit<Maintenance, 'id' | 'createdAt' | 'clientName' | 'lastPeriod'>;
+export interface Todo {
+  id: number;
+  clientId: number;
+  text: string;
+  done: boolean;
+  createdAt: string;
+  doneAt: string | null;
+  clientName?: string;
+  clientColor?: string;
+}
 
 export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'cancelled';
 
@@ -195,4 +210,24 @@ export interface Dashboard {
   perClient: { clientId: number; name: string; color: string; hours: number; value: number; currency: Currency }[];
   recentEntries: Entry[];
   overdueInvoices: Invoice[];
+  openTodos: Todo[];
+}
+
+export interface StatsRow {
+  hours: number;
+  value: number;
+  currency: Currency;
+  entries: number;
+}
+
+export interface Stats {
+  from: string;
+  to: string;
+  totalHours: number;
+  totalEntries: number;
+  value: MoneyByCurrency[];
+  invoiced: MoneyByCurrency[];
+  byMonth: { month: string; hours: number; byClient: { clientId: number; hours: number }[] }[];
+  byClient: (StatsRow & { clientId: number; name: string; color: string })[];
+  byProject: (StatsRow & { clientId: number; clientName: string; color: string; project: string; firstDate: string; lastDate: string })[];
 }

@@ -4,6 +4,7 @@ import { formatDate, formatHours, formatMoney, formatNumber } from '../../shared
 import { LABELS } from './labels.ts';
 import { accent, baseDocument, clientBlock, COLORS, headerBlock, metaTable, tableLayout, th } from './common.ts';
 import { workReportTable } from './report.ts';
+import { ipsQrString } from './ipsQr.ts';
 
 /** Definicija PDF dokumenta fakture (sa opcionim izveštajem o radu kao drugom stranom). */
 export function invoiceDocument(invoice: Invoice, entries: Entry[]): TDocumentDefinitions {
@@ -42,7 +43,7 @@ export function invoiceDocument(invoice: Invoice, entries: Entry[]): TDocumentDe
   if (s.swift && !domestic) payRows.push([L.swift, s.swift]);
   if (s.bankName) payRows.push([L.bank, s.bankName]);
   payRows.push([L.reference, invoice.number]);
-  payment.push({
+  const payTable: Content = {
     table: {
       widths: ['auto', '*'],
       body: payRows.map(([k, v]) => [
@@ -51,7 +52,20 @@ export function invoiceDocument(invoice: Invoice, entries: Entry[]): TDocumentDe
       ]),
     },
     layout: 'noBorders',
-  });
+  };
+  // IPS QR kod: samo za dinarske fakture na srpskom, ako je uključen u podešavanjima.
+  const qr =
+    domestic && s.ipsQr !== false
+      ? ipsQrString({
+          account: s.bankAccount,
+          payeeName: s.companyName || s.ownerName,
+          payeeAddress: [s.address, [s.zip, s.city].filter(Boolean).join(' ')].filter(Boolean).join(', '),
+          amount: invoice.total,
+          paymentCode: s.paymentCode ?? '221',
+          purpose: `Faktura ${invoice.number}`,
+        })
+      : null;
+  payment.push(payTable);
 
   const content: Content[] = [
     ...headerBlock(s, lang, L.invoice, `${L.invoiceNo} ${invoice.number}`),
@@ -128,8 +142,19 @@ export function invoiceDocument(invoice: Invoice, entries: Entry[]): TDocumentDe
         invoice.notes.trim()
           ? { width: '*', stack: [{ text: L.notes.toUpperCase(), style: 'sectionTitle' }, { text: invoice.notes, color: COLORS.muted }] }
           : { width: '*', text: '' },
+        ...(qr
+          ? [
+              {
+                width: 96,
+                stack: [
+                  { qr, fit: 96, eccLevel: 'M', mode: 'octet' },
+                  { text: 'IPS QR – skenirajte u m-banking aplikaciji', style: 'small', fontSize: 6.5, alignment: 'center', margin: [0, 3, 0, 0] },
+                ],
+              } as Content,
+            ]
+          : []),
       ],
-      columnGap: 24,
+      columnGap: 20,
     },
   ];
 

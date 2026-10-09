@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import {
+  Alert,
   Button,
   Checkbox,
   ColorInput,
@@ -27,6 +28,7 @@ import { CURRENCIES } from '../../shared/types.ts';
 import { formatInvoiceNumber, today } from '../../shared/format.ts';
 import { notifyError, notifyOk, request, useSaveSettings, useSettings } from '../api.ts';
 import { PageHeader } from '../components/common.tsx';
+import { normalizeAccount } from '../pdf/ipsQr.ts';
 import { downloadUrl } from '../utils.ts';
 
 /** Smanjuje sliku na razumnu veličinu i vraća PNG data URL (da PDF ne bude ogroman). */
@@ -141,6 +143,30 @@ export function SettingsPage() {
                 <TextInput label="IBAN (devizni)" description="Prikazuje se na fakturama u stranoj valuti" {...form.getInputProps('iban')} />
                 <TextInput label="SWIFT / BIC" {...form.getInputProps('swift')} />
               </SimpleGrid>
+              <Divider label="IPS QR kod" labelPosition="left" mt="md" mb="xs" />
+              <Group align="flex-start" gap="lg">
+                <Checkbox
+                  mt={4}
+                  label="IPS QR kod na dinarskim fakturama"
+                  description="Klijent skenira kod u m-banking aplikaciji i plaćanje je popunjeno (račun, iznos, svrha)."
+                  style={{ flex: 1 }}
+                  {...form.getInputProps('ipsQr', { type: 'checkbox' })}
+                />
+                {v.ipsQr && (
+                  <TextInput
+                    label="Šifra plaćanja"
+                    description="221 je uobičajena"
+                    w={140}
+                    {...form.getInputProps('paymentCode')}
+                    error={v.paymentCode && !/^[12]\d\d$/.test(v.paymentCode) ? 'Tri cifre (npr. 221)' : undefined}
+                  />
+                )}
+              </Group>
+              {v.ipsQr && v.bankAccount && !normalizeAccount(v.bankAccount) && (
+                <Alert color="yellow" variant="light" mt="xs" p="xs">
+                  Tekući račun nije ispravan (proverite cifre i kontrolni broj), pa se QR kod neće prikazati.
+                </Alert>
+              )}
             </Section>
 
             <Section title="Fakture">

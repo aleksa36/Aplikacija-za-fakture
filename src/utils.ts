@@ -17,13 +17,11 @@ export const STATUS_COLOR: Record<InvoiceStatus, string> = {
   cancelled: 'red',
 };
 
-export const INTERVAL_LABEL: Record<number, string> = {
-  1: 'Mesečno',
-  2: 'Na 2 meseca',
-  3: 'Kvartalno',
-  6: 'Polugodišnje',
-  12: 'Godišnje',
-};
+/** Naziv projekta za prikaz (posebne vrednosti iz statistike). */
+export function projectLabel(project: string): string {
+  if (project === '__maintenance') return 'Mesečno održavanje';
+  return project || 'Bez projekta';
+}
 
 /**
  * Prihvata "1,5", "1.5", "1:30", "1h30", "1h 30m", "90m" i vraća broj sati (ili null).
@@ -71,3 +69,13 @@ export function downloadUrl(url: string) {
   a.click();
   a.remove();
 }
+
+/** Srpska množina: count(1, 'unos', 'unosa', 'unosa') → "1 unos", 3 → "3 unosa", 5 → "5 unosa". */
+export function count(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  const word = mod10 === 1 && mod100 !== 11 ? one : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? few : many;
+  return `${n} ${word}`;
+}
+
+export const countEntries = (n: number) => count(n, 'unos', 'unosa', 'unosa');

@@ -22,14 +22,16 @@ import {
   useMantineTheme,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
+import { MonthPickerInput } from '@mantine/dates';
 import { modals } from '@mantine/modals';
 import { IconArchive, IconArchiveOff, IconDots, IconEdit, IconPlus, IconTrash } from '@tabler/icons-react';
+import { useNavigate } from 'react-router-dom';
 import type { Client, ClientInput } from '../../shared/types.ts';
 import { CURRENCIES } from '../../shared/types.ts';
 import { formatMoney } from '../../shared/format.ts';
 import { useClients, useDeleteClient, useSaveClient, useSettings } from '../api.ts';
 import { ClientDot, EmptyState, PageHeader } from '../components/common.tsx';
-import { CLIENT_COLORS } from '../utils.ts';
+import { CLIENT_COLORS, count } from '../utils.ts';
 
 export function ClientsPage() {
   const clients = useClients();
@@ -37,6 +39,7 @@ export function ClientsPage() {
   const del = useDeleteClient();
   const [showArchived, setShowArchived] = useState(false);
   const [editing, setEditing] = useState<Client | 'new' | null>(null);
+  const navigate = useNavigate();
 
   const list = (clients.data ?? []).filter((c) => showArchived || !c.archived);
 
@@ -82,7 +85,7 @@ export function ClientsPage() {
                   <Table.Th>Naziv</Table.Th>
                   <Table.Th>Mesto</Table.Th>
                   <Table.Th>PIB</Table.Th>
-                  <Table.Th className="num">Satnica</Table.Th>
+                  <Table.Th className="num">Satnica / održavanje</Table.Th>
                   <Table.Th>Rok</Table.Th>
                   <Table.Th>Jezik</Table.Th>
                   <Table.Th />
@@ -90,7 +93,7 @@ export function ClientsPage() {
               </Table.Thead>
               <Table.Tbody>
                 {list.map((c) => (
-                  <Table.Tr key={c.id} className="clickable-row" onClick={() => setEditing(c)} opacity={c.archived ? 0.55 : 1}>
+                  <Table.Tr key={c.id} className="clickable-row" onClick={() => navigate(`/klijenti/${c.id}`)} opacity={c.archived ? 0.55 : 1}>
                     <Table.Td>
                       <Group gap="xs" wrap="nowrap">
                         <ClientDot color={c.color} />
@@ -105,6 +108,11 @@ export function ClientsPage() {
                           )}
                         </div>
                         {c.archived && <Badge size="xs" color="gray">arhiviran</Badge>}
+                        {!!c.openTodos && (
+                          <Badge size="xs" variant="light" color="orange" tt="none">
+                            {count(c.openTodos, 'zadatak', 'zadatka', 'zadataka')}
+                          </Badge>
+                        )}
                       </Group>
                     </Table.Td>
                     <Table.Td>
@@ -115,6 +123,11 @@ export function ClientsPage() {
                     </Table.Td>
                     <Table.Td className="num">
                       <Text size="sm">{formatMoney(c.hourlyRate, c.currency)}/h</Text>
+                      {c.maintenanceAmount > 0 && (
+                        <Text size="xs" c="dimmed">
+                          održavanje {formatMoney(c.maintenanceAmount, c.currency)}/mes.
+                        </Text>
+                      )}
                     </Table.Td>
                     <Table.Td>
                       <Text size="sm">{c.paymentDays} dana</Text>
@@ -173,7 +186,7 @@ export function ClientsPage() {
   );
 }
 
-function ClientForm({ client, onSaved }: { client?: Client; onSaved: () => void }) {
+export function ClientForm({ client, onSaved }: { client?: Client; onSaved: () => void }) {
   const settings = useSettings();
   const save = useSaveClient();
   const theme = useMantineTheme();
@@ -200,6 +213,9 @@ function ClientForm({ client, onSaved }: { client?: Client; onSaved: () => void 
           notes: '',
           color: CLIENT_COLORS[Math.floor(Math.random() * CLIENT_COLORS.length)],
           archived: false,
+          maintenanceAmount: 0,
+          maintenanceLabel: 'Mesečno održavanje',
+          maintenanceStart: null,
         },
     validate: {
       name: (v) => (v.trim() ? null : 'Naziv je obavezan'),
@@ -258,6 +274,33 @@ function ClientForm({ client, onSaved }: { client?: Client; onSaved: () => void 
           description="Važi samo ako ste u sistemu PDV-a."
           {...form.getInputProps('vatExempt', { type: 'checkbox' })}
         />
+        <Divider label="Mesečno održavanje" labelPosition="left" mt="xs" />
+        <Text size="xs" c="dimmed" mt={-6}>
+          Ako unesete iznos, održavanje se automatski upisuje svakog meseca sa naslovom „{form.values.maintenanceLabel || 'Mesečno održavanje'} – mesec godina”.
+          Ostavite 0 ako klijent nema održavanje.
+        </Text>
+        <SimpleGrid cols={{ base: 1, sm: 3 }}>
+          <NumberInput
+            label="Iznos mesečno"
+            min={0}
+            decimalSeparator=","
+            thousandSeparator="."
+            hideControls
+            rightSection={<Text size="xs" c="dimmed">{form.values.currency}</Text>}
+            {...form.getInputProps('maintenanceAmount')}
+          />
+          <TextInput label="Naziv na fakturi" {...form.getInputProps('maintenanceLabel')} />
+          <MonthPickerInput
+            label="Upisuje se od meseca"
+            valueFormat="MMMM YYYY"
+            placeholder="tekući mesec"
+            disabled={!(Number(form.values.maintenanceAmount) > 0)}
+            value={form.values.maintenanceStart ? `${form.values.maintenanceStart}-01` : null}
+            onChange={(v) => form.setFieldValue('maintenanceStart', v ? v.slice(0, 7) : null)}
+            clearable
+          />
+        </SimpleGrid>
+
         <Textarea
           label="Napomena na fakturi"
           description="Dodaje se iznad podrazumevane napomene (npr. broj ugovora, poziv na broj, reverse charge…)"

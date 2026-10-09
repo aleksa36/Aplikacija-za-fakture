@@ -27,3 +27,117 @@ body {
   border-radius: var(--mantine-radius-md);
   background: #fff;
 }
+
+/* Grafikon sati po mesecima (jedna serija, plava; posebno podešena za tamnu temu) */
+:root {
+  --chart-series: #2a78d6;
+  --chart-series-hover: #4b8fe0;
+}
+[data-mantine-color-scheme='dark'] {
+  --chart-series: #3987e5;
+  --chart-series-hover: #5c9dea;
+}
+
+.hours-chart {
+  position: relative;
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 0 8px;
+}
+
+.hours-chart__axis {
+  position: relative;
+  height: 180px;
+  font-size: 11px;
+  color: var(--mantine-color-dimmed);
+  font-variant-numeric: tabular-nums;
+}
+
+.hours-chart__axis span {
+  position: absolute;
+  right: 0;
+  transform: translateY(50%);
+}
+
+.hours-chart__plot {
+  position: relative;
+  height: 180px;
+  display: flex;
+  align-items: flex-end;
+}
+
+.hours-chart__grid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--mantine-color-default-border);
+}
+
+.hours-chart__slot {
+  position: relative;
+  flex: 1 1 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.hours-chart__slot:focus-visible {
+  outline: 2px solid var(--chart-series);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+.hours-chart__bar {
+  width: min(24px, 60%);
+  background: var(--chart-series);
+  border-radius: 4px 4px 0 0;
+  transition: background 120ms;
+}
+
+.hours-chart__slot:hover .hours-chart__bar,
+.hours-chart__slot:focus-visible .hours-chart__bar {
+  background: var(--chart-series-hover);
+}
+
+.hours-chart__cap {
+  position: absolute;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--mantine-color-text);
+  transform: translateY(-4px);
+}
+
+.hours-chart__labels {
+  grid-column: 2;
+  display: flex;
+  margin-top: 6px;
+}
+
+.hours-chart__labels span {
+  flex: 1 1 0;
+  text-align: center;
+  font-size: 11px;
+  color: var(--mantine-color-dimmed);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--mantine-color-default-border);
+  overflow: hidden;
+}
+
+.meter > div {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--chart-series);
+}
